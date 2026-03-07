@@ -1,0 +1,12 @@
+name: web_research
+description: Perform deep web research on a given query, extract relevant information, and synthesize a structured response.
+tools:
+  - search_web
+  - fetch_url
+inputs:
+  query: "The research question or topic (string)"
+  max_depth: "How many sources to read in detail (integer, optional, default 3)"
+outputs:
+  query: "The original query (string)"
+  sources: "List of dictionaries containing title, url, snippet, and content (list)"
+  summary: "A synthesized high-level summary of the findings (string)"

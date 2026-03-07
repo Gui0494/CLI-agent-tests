@@ -1,0 +1,69 @@
+C:\Users\User\AppData\Local\Programs\Python\Python311\Lib\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.6.3) or chardet (6.0.0.post1)/charset_normalizer (3.4.4) doesn't match a supported version!
+  warnings.warn(
+============================= test session starts =============================
+platform win32 -- Python 3.11.9, pytest-9.0.2, pluggy-1.6.0 -- C:\Users\User\AppData\Local\Programs\Python\Python311\python.exe
+cachedir: .pytest_cache
+hypothesis profile 'default'
+rootdir: C:\Users\User\Downloads\CLI-agent-claude-cli-agent-planning-Z804h\CLI-agent-claude-cli-agent-planning-Z804h\python
+configfile: pyproject.toml
+plugins: anyio-4.12.1, Faker-22.6.0, hypothesis-6.151.3, langsmith-0.6.6, asyncio-1.3.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 3 items
+
+python\tests\test_search.py::test_search_with_cache PASSED               [ 33%]
+python\tests\test_search.py::test_search_with_cache ERROR                [ 33%]
+python\tests\test_search.py::test_search_fallback PASSED                 [ 66%]
+python\tests\test_search.py::test_search_fallback ERROR                  [ 66%]
+python\tests\test_search.py::test_fetch_url_cached PASSED                [100%]
+python\tests\test_search.py::test_fetch_url_cached ERROR                 [100%]
+
+=================================== ERRORS ====================================
+_________________ ERROR at teardown of test_search_with_cache _________________
+
+    @pytest.fixture
+    def orchestrator():
+        cache = SQLiteCache(db_path=TEST_DB, ttl=2)
+        limiter = RateLimiter()
+        orch = SearchOrchestrator(cache=cache, rate_limiter=limiter)
+        yield orch
+        cache.clear()
+        try:
+>           os.remove(TEST_DB)
+E           PermissionError: [WinError 32] O arquivo já está sendo usado por outro processo: 'test_search_cache.db'
+
+python\tests\test_search.py:22: PermissionError
+__________________ ERROR at teardown of test_search_fallback __________________
+
+    @pytest.fixture
+    def orchestrator():
+        cache = SQLiteCache(db_path=TEST_DB, ttl=2)
+        limiter = RateLimiter()
+        orch = SearchOrchestrator(cache=cache, rate_limiter=limiter)
+        yield orch
+        cache.clear()
+        try:
+>           os.remove(TEST_DB)
+E           PermissionError: [WinError 32] O arquivo já está sendo usado por outro processo: 'test_search_cache.db'
+
+python\tests\test_search.py:22: PermissionError
+---------------------------- Captured stderr call -----------------------------
+[search] tavily failed: Tavily down
+_________________ ERROR at teardown of test_fetch_url_cached __________________
+
+    @pytest.fixture
+    def orchestrator():
+        cache = SQLiteCache(db_path=TEST_DB, ttl=2)
+        limiter = RateLimiter()
+        orch = SearchOrchestrator(cache=cache, rate_limiter=limiter)
+        yield orch
+        cache.clear()
+        try:
+>           os.remove(TEST_DB)
+E           PermissionError: [WinError 32] O arquivo já está sendo usado por outro processo: 'test_search_cache.db'
+
+python\tests\test_search.py:22: PermissionError
+=========================== short test summary info ===========================
+ERROR python\tests\test_search.py::test_search_with_cache - PermissionError: ...
+ERROR python\tests\test_search.py::test_search_fallback - PermissionError: [W...
+ERROR python\tests\test_search.py::test_fetch_url_cached - PermissionError: [...
+========================= 3 passed, 3 errors in 1.91s =========================

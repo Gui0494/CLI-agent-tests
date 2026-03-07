@@ -1,0 +1,17 @@
+FROM node:20-slim
+
+RUN apt-get update && apt-get install -y \
+    python3 python3-pip python3-venv \
+    git curl wget \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN npm install -g typescript eslint prettier
+
+WORKDIR /workspace
+
+# Non-root user for security
+RUN useradd -m -s /bin/bash aurex
+USER aurex
+
+CMD ["bash"]

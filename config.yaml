@@ -1,0 +1,56 @@
+# AurexAI Runtime Configuration
+
+executor:
+  timeout_ms: 60000
+  max_retries: 3
+  docker_image: "aurex-sandbox:latest"
+  memory_limit: "512m"
+  cpu_limit: "1.0"
+
+verifier:
+  auto_detect: true
+  pipeline:
+    - unit_tests
+    - lint
+    - typecheck
+    - e2e
+
+search:
+  cache_ttl_hours: 24
+  max_results: 10
+  fallback_chain:
+    - tavily
+    - serper
+    - firecrawl
+
+rate_limits:
+  tavily:
+    max_requests: 33
+    window_seconds: 86400
+  jina:
+    max_requests: 200
+    window_seconds: 86400
+  serper:
+    max_requests: 3
+    window_seconds: 86400
+  openrouter:
+    max_requests: 50
+    window_seconds: 86400
+  github:
+    max_requests: 5000
+    window_seconds: 3600
+  firecrawl:
+    max_requests: 500
+    window_seconds: 999999999
+
+llm:
+  default_model: "meta-llama/llama-3.3-70b-instruct:free"
+  fallback_model: "meta-llama/llama-3.2-3b-instruct:free"
+  max_tokens: 4096
+  temperature: 0.7
+  memory_turns: 10
+
+repo_agent:
+  auto_label: true
+  pr_template: true
+  review_on_push: false
