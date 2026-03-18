@@ -16,7 +16,7 @@ export interface WriteFileArgs { path: string; content: string; }
 export interface GrepArgs { path?: string; pattern: string; }
 export interface CreateAgentArgs { agent_name: string; purpose: string; triggers: string[]; tools: string[]; output_dir?: string; }
 
-export async function handleExec(tool_args: ExecArgs, executor: { run: (cmd: string) => Promise<any> }, appContext?: AppContext): Promise<ToolResult> {
+export async function handleExec(tool_args: ExecArgs, executor: { run: (cmd: string) => Promise<{ stdout: string; stderr: string; exitCode: number; timedOut: boolean }> }, appContext?: AppContext): Promise<ToolResult> {
     if (appContext) {
         const hookEngine = getHookEngine();
         const hookRes = await hookEngine.emit(HookEvent.PRE_SHELL, { mode: appContext.modeManager.getMode(), command: tool_args.cmd });
@@ -219,7 +219,7 @@ export async function handleCreateAgent(tool_args: CreateAgentArgs, ask: AskFunc
     
     const bridgeScript = path.resolve(process.cwd(), "..", "skill-creator-main", "skill-creator-main", "agent-creator", "scripts", "cli_bridge.py");
     
-    const runCreate = () => new Promise<any>((resolve) => {
+    const runCreate = () => new Promise<{ code: number | null; response: { status?: string; error?: { message?: string }; [key: string]: unknown } }>((resolve) => {
         const proc = spawn("python3", [bridgeScript, "--create"], { env: { ...process.env, PYTHONUNBUFFERED: "1" } });
         let stdoutStr = "";
         proc.stdout.on("data", (data) => stdoutStr += data.toString());

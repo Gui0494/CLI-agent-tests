@@ -56,7 +56,7 @@ export function createRepoAgent(config: RepoAgentConfig = {}) {
         if (!file.patch || !config.bridge) continue;
 
         console.log(`Reviewing ${file.filename}...`);
-        const res = await config.bridge.call("llm_chat", {
+        const res = await config.bridge.call<{ content: string }>("llm_chat", {
           messages: [
             { role: "system", content: "You are a strict but helpful code reviewer. Return ONLY concise, actionable feedback for the provided git diff. If the code looks good, return exactly 'LGTM'." },
             { role: "user", content: `File: ${file.filename}\nDiff:\n${file.patch}` }
