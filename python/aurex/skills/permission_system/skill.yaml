@@ -1,0 +1,45 @@
+name: permission_system
+description: >
+  Sistema de permissões com confirmação interativa para ações destrutivas.
+  Implementa whitelist/blacklist de operações, classificação de risco,
+  e modos de permissão (auto-approve, ask-always, smart). Protege contra
+  operações perigosas como deletar arquivos, force push, drop tables.
+version: "1.0.0"
+priority: P0
+tools: []
+inputs:
+  action:
+    type: string
+    required: true
+    description: "Ação a ser validada (ex: delete_file, git_push, exec_command)"
+  args:
+    type: object
+    required: false
+    description: Argumentos da ação para análise de risco
+  mode:
+    type: string
+    required: false
+    default: smart
+    description: "Modo de permissão: auto_approve, ask_always, smart"
+  user_rules:
+    type: object
+    required: false
+    description: Regras customizadas do usuário (whitelist, blacklist)
+outputs:
+  allowed:
+    type: boolean
+    description: Se a ação foi permitida
+  risk_level:
+    type: string
+    description: "Nível de risco: safe, low, medium, high, critical"
+  reason:
+    type: string
+    description: Razão da decisão
+  requires_confirmation:
+    type: boolean
+    description: Se precisou de confirmação do usuário
+tags:
+  - security
+  - permissions
+  - core
+  - safety

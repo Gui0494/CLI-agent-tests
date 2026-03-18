@@ -55,7 +55,7 @@ def test_stats(cache: SQLiteCache):
 
 def test_normalize_url():
     assert normalize_url("https://Example.COM/path/") == "https://example.com/path"
-    assert normalize_url("https://example.com/path?utm_source=x&a=1") == "https://example.com/path?a=%5B%271%27%5D" or True
+    assert "a=" in normalize_url("https://example.com/path?utm_source=x&a=1")
     # Tracking params removed
     normalized = normalize_url("https://example.com?utm_source=google&q=test")
     assert "utm_source" not in normalized

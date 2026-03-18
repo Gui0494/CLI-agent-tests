@@ -9,3 +9,7 @@ python/aurex.egg-info/
 aurex_cache.db
 *.db
 .DS_Store
+logs/
+caches/
+test*.txt
+*.log

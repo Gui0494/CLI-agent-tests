@@ -17,7 +17,6 @@ from aurex.ratelimit.limiter import RateLimiter
 import os
 from aurex.core.tool_registry import ToolRegistry
 from aurex.core.context_manager import ContextManager
-from aurex.core.planner import PlannerFacade
 from aurex.core.skill_loader import SkillLoader
 from aurex.core.agent_loop import AgentLoop
 
@@ -44,6 +43,21 @@ class JsonRpcServer:
         # New Core Agent Architecture
         self.tool_registry = ToolRegistry()
         
+        # Setup permission system
+        from aurex.skills.permission_system.run import PermissionManager
+        
+        async def ask_user(action, args, risk, reason):
+            result = await self.call_client("permission_request", {
+                "action": action,
+                "args": args,
+                "risk_level": risk,
+                "reason": reason
+            })
+            return "y" if result.get("allowed") else "n"
+
+        self.permission_manager = PermissionManager(ask_callback=ask_user)
+        self.tool_registry.set_permission_manager(self.permission_manager)
+        
         # Register atomic tools using search orchestrator wrappers
         async def search_web_tool(query: str, max_results: int = 5):
             results = await self.search.search(query, max_results=max_results)
@@ -52,19 +66,180 @@ class JsonRpcServer:
         async def fetch_url_tool(url: str):
             content = await self.search.fetch_url(url)
             return {"content": content}
+
+        # Node Proxied Tools
+        async def exec_command_tool(cmd: str):
+            result = await self.call_client("run_node_tool", {"tool_name": "exec_command", "tool_args": {"cmd": cmd}})
+            return result
+
+        async def read_file_tool(path: str):
+            result = await self.call_client("run_node_tool", {"tool_name": "read_file", "tool_args": {"path": path}})
+            return result
+
+        async def list_files_tool(dir: str = "."):
+            result = await self.call_client("run_node_tool", {"tool_name": "list_files", "tool_args": {"dir": dir}})
+            return result
+
+        async def edit_file_tool(path: str, old_text: str, new_text: str, replace_all: bool = False):
+            result = await self.call_client("run_node_tool", {"tool_name": "edit_file", "tool_args": {
+                "path": path, "old_text": old_text, "new_text": new_text, "replace_all": replace_all
+            }})
+            return result
+
+        async def write_file_tool(path: str, content: str):
+            result = await self.call_client("run_node_tool", {"tool_name": "write_file", "tool_args": {
+                "path": path, "content": content
+            }})
+            return result
+
+        async def grep_tool(pattern: str, path: str = "."):
+            result = await self.call_client("run_node_tool", {"tool_name": "grep", "tool_args": {
+                "pattern": pattern, "path": path
+            }})
+            return result
             
-        self.tool_registry.register("search_web", search_web_tool, timeout_seconds=15)
-        self.tool_registry.register("fetch_url", fetch_url_tool, timeout_seconds=30)
+        async def create_agent_tool(agent_name: str, purpose: str, triggers: list, tools: list):
+            import os
+            output_dir = os.path.join(os.path.dirname(__file__), "skills")
+            result = await self.call_client("run_node_tool", {
+                "tool_name": "create_agent",
+                "tool_args": {
+                    "agent_name": agent_name,
+                    "purpose": purpose,
+                    "triggers": triggers,
+                    "tools": tools,
+                    "output_dir": output_dir
+                }
+            })
+            if result and result.get("ok"):
+                # Dynamically hot-load the new skill/agent into the ecosystem
+                skill_path = os.path.join(output_dir, agent_name)
+                if os.path.exists(skill_path):
+                    self.skill_loader._load_skill(agent_name, skill_path)
+            return result
+            
+        self.tool_registry.register("search_web", search_web_tool, schema={
+            "name": "search_web",
+            "description": "Searches the web for recent information.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "The search query."}
+                },
+                "required": ["query"]
+            }
+        }, timeout_seconds=15)
+        
+        self.tool_registry.register("fetch_url", fetch_url_tool, schema={
+            "name": "fetch_url",
+            "description": "Fetches raw text content from a specified URL.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "The URL to fetch."}
+                },
+                "required": ["url"]
+            }
+        }, timeout_seconds=30)
+
+        self.tool_registry.register("exec_command", exec_command_tool, schema={
+            "name": "exec_command",
+            "description": "Run a bash command in a secure, isolated Docker sandbox. Returns stdout, stderr, and exit_code.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "cmd": {"type": "string", "description": "Command to run in the Docker sandbox"}
+                },
+                "required": ["cmd"]
+            }
+        }, timeout_seconds=600, risk_level="medium")
+
+        self.tool_registry.register("read_file", read_file_tool, schema={
+            "name": "read_file",
+            "description": "Read the contents of a file in the workspace.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to the file to read"}
+                },
+                "required": ["path"]
+            }
+        }, timeout_seconds=15, risk_level="safe")
+
+        self.tool_registry.register("list_files", list_files_tool, schema={
+            "name": "list_files",
+            "description": "List all files in a directory recursively.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "dir": {"type": "string", "description": "Directory to list files from (default: .)"}
+                }
+            }
+        }, timeout_seconds=15, risk_level="safe")
+
+        self.tool_registry.register("edit_file", edit_file_tool, schema={
+            "name": "edit_file",
+            "description": "Edit an existing file using FIM or localized diff patching. You MUST prioritize this tool over write_file to modify existing code. old_text must be an exact unique substring. new_text replaces it.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to the file to edit"},
+                    "old_text": {"type": "string", "description": "Exact text to find in the file (must be unique)"},
+                    "new_text": {"type": "string", "description": "Text to replace old_text with"},
+                    "replace_all": {"type": "boolean", "description": "Replace all occurrences instead of requiring uniqueness (default: false)"}
+                },
+                "required": ["path", "old_text", "new_text"]
+            }
+        }, timeout_seconds=300, risk_level="low")
+
+        self.tool_registry.register("write_file", write_file_tool, schema={
+            "name": "write_file",
+            "description": "Create a new file. ONLY use this for entirely new files. For modifying existing files, you MUST use the edit_file tool to apply non-destructive patches.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to the file to create/overwrite"},
+                    "content": {"type": "string", "description": "Content to write to the file"}
+                },
+                "required": ["path", "content"]
+            }
+        }, timeout_seconds=300, risk_level="medium")
+
+        self.tool_registry.register("grep", grep_tool, schema={
+            "name": "grep",
+            "description": "Search for a text pattern across files. Returns matching lines with file paths and line numbers.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string", "description": "Text pattern to search for"},
+                    "path": {"type": "string", "description": "File or directory to search in (default: current directory)"}
+                },
+                "required": ["pattern"]
+            }
+        }, timeout_seconds=15, risk_level="safe")
+        
+        self.tool_registry.register("create_agent", create_agent_tool, schema={
+            "name": "create_agent",
+            "description": "Create a new specialized subagent/skill dynamically when no existing tool/skill can fulfill the user's highly specific request. Returns success and loads it into the system instantly.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "agent_name": {"type": "string", "description": "A short, hyphenated name (e.g., 'design-expert')"},
+                    "purpose": {"type": "string", "description": "The specific purpose and scope of the agent"},
+                    "triggers": {"type": "array", "items": {"type": "string"}, "description": "Keywords that trigger this agent"},
+                    "tools": {"type": "array", "items": {"type": "string"}, "description": "Existing tools the agent will use (e.g., ['read_file', 'exec_command'])"}
+                },
+                "required": ["agent_name", "purpose", "triggers", "tools"]
+            }
+        }, timeout_seconds=900, risk_level="medium")
         
         self.context_manager = ContextManager(llm_client=self.llm)
-        self.planner_facade = PlannerFacade(llm_client=self.llm, config=self.config)
-        self.skill_loader = SkillLoader(
-            skills_dir=os.path.join(os.path.dirname(__file__), "skills"),
-            tool_registry=self.tool_registry
-        )
+        skills_dir = os.path.join(os.path.dirname(__file__), "skills")
+        self.skill_loader = SkillLoader(skills_dir=skills_dir, tool_registry=self.tool_registry)
+        
+        # Instantiate loops using native function calling
         self.agent_loop = AgentLoop(
             config=self.config,
-            planner=self.planner_facade,
             context_manager=self.context_manager,
             tool_registry=self.tool_registry,
             skill_loader=self.skill_loader
@@ -74,10 +249,24 @@ class JsonRpcServer:
             "search": self._handle_search,
             "fetch_url": self._handle_fetch_url,
             "llm_chat": self._handle_llm_chat,
+            "llm_stream": self._handle_llm_stream,
             "llm_plan": self._handle_llm_plan,
             "academic_search": self._handle_academic_search,
             "agent_run": self._handle_agent_run,
+            "execute_tool": self._handle_execute_tool,
+            "manage_history": self._handle_manage_history,
         }
+
+        self.pending_requests = {}
+        self.request_id_counter = 10000
+
+    async def _handle_execute_tool(self, params: dict) -> dict:
+        name = params.get("name")
+        args = params.get("params", {})
+        if not name:
+            return {"error": "Tool name is required"}
+        result = await self.tool_registry.execute(name, args)
+        return result
 
     async def _handle_search(self, params: dict) -> dict:
         query = params.get("query", "")
@@ -99,6 +288,51 @@ class JsonRpcServer:
         response = await self.llm.chat(messages, model=model)
         return {"content": response}
 
+    async def _handle_llm_stream(self, params: dict) -> dict:
+        prompt = params.get("prompt", "")
+        
+        try:
+            from aurex.skills.streaming_engine.run import run as stream_run
+        except ImportError:
+            return {"error": "streaming_engine module not found"}
+
+        def on_token(chunk):
+            self.send_notification("stream_token", chunk)
+
+        stream_params = {
+            "prompt": prompt,
+            "stream_mode": "callback",
+            "callback": on_token,
+        }
+
+        # Auto-inject model from config if not passed
+        if "model" not in params:
+            params["model"] = self.config.llm.default_model
+
+        for k in ["system_prompt", "model", "temperature", "provider", "api_key"]:
+            if k in params:
+                stream_params[k] = params[k]
+
+        # Auto-inject provider based on model
+        if "provider" not in stream_params:
+            if "deepseek" in stream_params.get("model", "").lower():
+                stream_params["provider"] = "deepseek"
+            else:
+                stream_params["provider"] = "openrouter"
+
+        # Auto-inject API key from environment if not provided
+        if "api_key" not in stream_params or not stream_params["api_key"]:
+            provider = stream_params.get("provider", "openrouter")
+            if provider == "anthropic":
+                stream_params["api_key"] = os.environ.get("ANTHROPIC_API_KEY", "")
+            elif provider == "deepseek":
+                stream_params["api_key"] = os.environ.get("DEEPSEEK_API_KEY", "")
+            else:
+                stream_params["api_key"] = os.environ.get("OPENROUTER_API_KEY", "")
+
+        result = await stream_run(stream_params, tool_registry=self.tool_registry)
+        return result
+
     async def _handle_llm_plan(self, params: dict) -> dict:
         task = params.get("task", "")
         plan = await self.legacy_planner.create_plan(task)
@@ -115,6 +349,20 @@ class JsonRpcServer:
         from aurex.search.academic import search_academic
         results = await search_academic(query)
         return {"results": results}
+
+    async def _handle_manage_history(self, params: dict) -> dict:
+        action = params.get("action", "status")
+        if action == "load":
+            success = self.context_manager.load_from_disk()
+            return {"success": success, "message": "History loaded" if success else "No history found", "length": len(self.context_manager.long_term_memory)}
+        elif action == "clear":
+            self.context_manager.clear_history()
+            return {"success": True, "message": "History cleared"}
+        elif action == "undo":
+            self.context_manager.undo_last_interaction()
+            return {"success": True, "message": "Undid recent interaction steps", "length": len(self.context_manager.long_term_memory)}
+        else:
+            return {"success": True, "length": len(self.context_manager.long_term_memory)}
 
     async def handle_request(self, request: dict) -> dict:
         method = request.get("method", "")
@@ -140,12 +388,52 @@ class JsonRpcServer:
                 "id": req_id,
             }
 
+    def send_notification(self, method: str, params: dict):
+        """Sends a JSON-RPC notification (no ID) to the client."""
+        notification = {
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params
+        }
+        sys.stdout.write(json.dumps(notification) + "\n")
+        sys.stdout.flush()
+
+    async def call_client(self, method: str, params: dict) -> dict:
+        """Calls a method on the client (Node.js) and waits for the response."""
+        req_id = self.request_id_counter
+        self.request_id_counter += 1
+        
+        request = {
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params,
+            "id": req_id
+        }
+        
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        self.pending_requests[req_id] = future
+        
+        sys.stdout.write(json.dumps(request) + "\n")
+        sys.stdout.flush()
+        
+        return await future
+
+    async def _process_and_reply(self, request: dict):
+        try:
+            response = await self.handle_request(request)
+            sys.stdout.write(json.dumps(response) + "\n")
+            sys.stdout.flush()
+        except Exception as e:
+            sys.stderr.write(f"Error processing request: {e}\n")
+            sys.stderr.flush()
+
     async def run(self):
         # Signal ready
         sys.stdout.write(json.dumps({"ready": True}) + "\n")
         sys.stdout.flush()
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         while True:
             try:
@@ -158,10 +446,20 @@ class JsonRpcServer:
                     continue
 
                 request = json.loads(line)
-                response = await self.handle_request(request)
-
-                sys.stdout.write(json.dumps(response) + "\n")
-                sys.stdout.flush()
+                
+                # Check if it's a response to a server-initiated request
+                if ("result" in request or "error" in request) and "method" not in request:
+                    req_id = request.get("id")
+                    if req_id in self.pending_requests:
+                        future = self.pending_requests.pop(req_id)
+                        if "error" in request:
+                            future.set_exception(Exception(request["error"].get("message", "Unknown error")))
+                        else:
+                            future.set_result(request.get("result"))
+                        continue
+                
+                # Otherwise, it's a request from Node to Python
+                asyncio.create_task(self._process_and_reply(request))
 
             except json.JSONDecodeError as e:
                 sys.stderr.write(f"JSON parse error: {e}\n")

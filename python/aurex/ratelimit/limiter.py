@@ -14,6 +14,7 @@ class ProviderLimit:
     max_requests: int
     window_seconds: int
     timestamps: list[float] = field(default_factory=list)
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 # Default rate limits per provider
@@ -79,24 +80,26 @@ class RateLimiter:
             return  # No limit configured
 
         limit = self.providers[provider]
-        now = time.time()
-
-        # Remove expired timestamps
-        cutoff = now - limit.window_seconds
-        limit.timestamps = [t for t in limit.timestamps if t > cutoff]
-
-        # Wait if at capacity
-        while len(limit.timestamps) >= limit.max_requests:
-            oldest = limit.timestamps[0]
-            wait_time = oldest + limit.window_seconds - now
-            if wait_time > 0:
-                await asyncio.sleep(min(wait_time, 60))
+        
+        async with limit.lock:
             now = time.time()
+    
+            # Remove expired timestamps
             cutoff = now - limit.window_seconds
             limit.timestamps = [t for t in limit.timestamps if t > cutoff]
-
-        limit.timestamps.append(now)
-        self._save_to_db(provider, now)
+    
+            # Wait if at capacity
+            while len(limit.timestamps) >= limit.max_requests:
+                oldest = limit.timestamps[0]
+                wait_time = oldest + limit.window_seconds - now
+                if wait_time > 0:
+                    await asyncio.sleep(wait_time + 0.1)
+                now = time.time()
+                cutoff = now - limit.window_seconds
+                limit.timestamps = [t for t in limit.timestamps if t > cutoff]
+    
+            limit.timestamps.append(now)
+            self._save_to_db(provider, now)
 
     def remaining(self, provider: str) -> int:
         """Get remaining requests for a provider."""

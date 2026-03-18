@@ -47,6 +47,7 @@ class AurexConfig(BaseModel):
         "jina": RateLimitConfig(max_requests=200, window_seconds=86400),
         "serper": RateLimitConfig(max_requests=3, window_seconds=86400),
         "openrouter": RateLimitConfig(max_requests=50, window_seconds=86400),
+        "deepseek": RateLimitConfig(max_requests=1000, window_seconds=86400),
         "github": RateLimitConfig(max_requests=5000, window_seconds=3600),
         "firecrawl": RateLimitConfig(max_requests=500, window_seconds=999999999),
     })
@@ -89,6 +90,13 @@ def load_config(config_path: Optional[str | Path] = None) -> AurexConfig:
         import sys
         print(f"[config] Validation error: {e}", file=sys.stderr)
         _cached_config = AurexConfig()  # Safe defaults
+        
+    # Check mandatory LLM credentials before returning (skip if testing)
+    if "PYTEST_CURRENT_TEST" not in os.environ:
+        if not os.environ.get("OPENROUTER_API_KEY") and not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("DEEPSEEK_API_KEY"):
+            import sys
+            print("\n[CRITICAL] Missing OPENROUTER_API_KEY, ANTHROPIC_API_KEY, or DEEPSEEK_API_KEY in environment. LLM modules will fail.", file=sys.stderr)
+            sys.exit(1)
 
     return _cached_config
 

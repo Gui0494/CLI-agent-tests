@@ -11,6 +11,7 @@ export interface ExecutorConfig {
   useSandbox?: boolean;
   maxRetries?: number;
   workDir?: string;
+  onLocalFallbackRequest?: (command: string) => Promise<boolean>;
 }
 
 export interface ExecutionResult {
@@ -52,7 +53,16 @@ export function createExecutor(config: ExecutorConfig = {}) {
             // If Docker failed completely (transient), we throw to retry
             if (isTransientError(err)) throw err;
             // Otherwise Fallback to local if Docker not available
-            console.warn(`\n[executor] Sandbox unavailable or failed (${err.message}). Falling back to local execution.\nWARNING: Running command directly on your machine: ${command}\n`);
+            console.warn(`\n[executor] Sandbox unavailable or failed (${err.message}).`);
+            if (config.onLocalFallbackRequest) {
+              const approved = await config.onLocalFallbackRequest(command);
+              if (!approved) {
+                throw new Error("Sandbox failed and local execution was not approved.");
+              }
+            } else {
+              throw new Error("Sandbox failed and local execution requires explicit approval.");
+            }
+            console.warn(`\nWARNING: Running command directly on your machine: ${command}\n`);
             return runLocal(command, timeoutMs, attempts, workDir);
           }
         }

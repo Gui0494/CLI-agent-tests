@@ -1,0 +1,17 @@
+﻿src/cli/setup-bridge.ts(31,12): error TS2339: Property 'on' does not exist on type 'PythonBridge'.
+src/cli/setup-bridge.ts(33,20): error TS2339: Property 'emit' does not exist on type 'PythonBridge'.
+src/cli/setup-bridge.ts(43,20): error TS2339: Property 'sendResponse' does not exist on type 'PythonBridge'.
+src/cli/setup-bridge.ts(44,20): error TS2339: Property 'emit' does not exist on type 'PythonBridge'.
+src/cli/setup-bridge.ts(47,20): error TS2339: Property 'emit' does not exist on type 'PythonBridge'.
+src/cli/setup-bridge.ts(55,37): error TS2339: Property 'classifyError' does not exist on type 'typeof import("C:/Users/User/Downloads/CLI-agent-claude-cli-agent-planning-Z804h/CLI-agent-claude-cli-agent-planning-Z804h/src/executor/retry", { with: { "resolution-mode": "import" } })'.
+src/cli/setup-bridge.ts(63,33): error TS2339: Property 'classifyError' does not exist on type 'typeof import("C:/Users/User/Downloads/CLI-agent-claude-cli-agent-planning-Z804h/CLI-agent-claude-cli-agent-planning-Z804h/src/executor/retry", { with: { "resolution-mode": "import" } })'.
+src/cli/setup-bridge.ts(65,97): error TS18046: 'cmdErr' is of type 'unknown'.
+src/cli/setup-bridge.ts(312,24): error TS2339: Property 'sendResponse' does not exist on type 'PythonBridge'.
+src/cli/setup-bridge.ts(314,24): error TS2339: Property 'sendResponse' does not exist on type 'PythonBridge'.
+src/cli/setup-bridge.ts(316,24): error TS2339: Property 'emit' does not exist on type 'PythonBridge'.
+src/hooks/engine.ts(149,55): error TS2345: Argument of type 'unknown' is not assignable to parameter of type 'Error'.
+src/hooks/rules/on-session-start.ts(71,65): error TS18046: 'e' is of type 'unknown'.
+tests/e2e.test.ts(17,20): error TS18046: 'error' is of type 'unknown'.
+tests/e2e.test.ts(18,20): error TS18046: 'error' is of type 'unknown'.
+tests/e2e.test.ts(39,20): error TS18046: 'error' is of type 'unknown'.
+tests/e2e.test.ts(40,20): error TS18046: 'error' is of type 'unknown'.

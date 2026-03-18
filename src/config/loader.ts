@@ -4,7 +4,8 @@ import yaml from "js-yaml";
 import { fileURLToPath } from "url";
 import { ConfigSchema, AurexConfig } from "./schema.js";
 
-const __dirname = fileURLToPath(new URL(".", import.meta.url));
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 let cachedConfig: AurexConfig | null = null;
 
@@ -28,6 +29,9 @@ export function loadConfig(configPath?: string): AurexConfig {
         } catch (err) {
             console.warn(`[config] Failed to parse ${targetPath}, using defaults.`);
         }
+    } else if (!configPath) {
+        // Just use defaults in-memory, do not auto-create file to avoid overwriting user intent
+        fileConfig = {};
     }
 
     // 3. Override with Environment Variables (AUREX_*)

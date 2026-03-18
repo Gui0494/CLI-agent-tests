@@ -6,7 +6,7 @@ import os
 import yaml
 import importlib.util
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +62,10 @@ class SkillLoader:
         # 3. Import run.py
         try:
             spec = importlib.util.spec_from_file_location(f"skills.{folder_name}.run", run_path)
+            if spec is None or spec.loader is None:
+                logger.error(f"Failed to create module spec for {folder_name}")
+                return
+            
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
             
@@ -89,7 +93,7 @@ class SkillLoader:
                 logger.error(f"Skill {folder_name} missing required key '{key}' in skill.yaml.")
                 return False
                 
-        if schema['name'] != folder_name and folder_name != "web_research": # Ignore exact match initially if nested
+        if schema['name'] != folder_name:
             logger.warning(f"Skill name '{schema['name']}' does not match folder '{folder_name}'")
             
         return True

@@ -19,6 +19,7 @@ search:
   cache_ttl_hours: 24
   max_results: 10
   fallback_chain:
+    - deepseek
     - tavily
     - serper
     - firecrawl
@@ -36,6 +37,9 @@ rate_limits:
   openrouter:
     max_requests: 50
     window_seconds: 86400
+  deepseek:
+    max_requests: 50
+    window_seconds: 86400
   github:
     max_requests: 5000
     window_seconds: 3600
@@ -44,8 +48,8 @@ rate_limits:
     window_seconds: 999999999
 
 llm:
-  default_model: "meta-llama/llama-3.3-70b-instruct:free"
-  fallback_model: "meta-llama/llama-3.2-3b-instruct:free"
+  default_model: "deepseek-chat"
+  fallback_model: "google/gemini-2.0-flash-lite-preview-02-05:free"
   max_tokens: 4096
   temperature: 0.7
   memory_turns: 10

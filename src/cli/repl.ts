@@ -9,8 +9,14 @@ import { createVerifier } from "../verifier/test-runner.js";
 import { readFile, writeFile } from "../editor/file-ops.js";
 import { renderMarkdown, renderCitations } from "./renderer.js";
 import { COMMANDS, getHelp } from "./commands.js";
+import { createAppContext } from "../context.js";
+import { setupBridgeHandlers } from "./setup-bridge.js";
 
-const HISTORY_FILE = path.join(os.homedir(), ".aurex_history");
+const CONFIG_DIR = path.join(os.homedir(), ".config", "aurex");
+if (!fs.existsSync(CONFIG_DIR)) {
+  fs.mkdirSync(CONFIG_DIR, { recursive: true });
+}
+const HISTORY_FILE = path.join(CONFIG_DIR, "history");
 
 function parseCommandArgs(input: string): string[] {
   const regex = /"([^"\\]*(?:\\.[^"\\]*)*)"|'([^'\\]*(?:\\.[^'\\]*)*)'|(\S+)/g;
@@ -49,6 +55,18 @@ export async function startRepl(): Promise<void> {
     completer,
   });
 
+  const appContext = createAppContext();
+
+  appContext.modeManager.setConfirmFunction(async (msg) => {
+    return new Promise<boolean>((resolve) => {
+        rl.question(chalk.yellow(msg + " "), (ans: string) => {
+            resolve(["y", "yes", "s", "sim"].includes(ans.trim().toLowerCase()));
+        });
+    });
+  });
+
+  setupBridgeHandlers(bridge, appContext, rl, {});
+
   // Load history
   if (fs.existsSync(HISTORY_FILE)) {
     try {
@@ -71,7 +89,7 @@ export async function startRepl(): Promise<void> {
     try {
       if (input.startsWith("/")) {
         fs.appendFileSync(HISTORY_FILE, input + "\n");
-        await handleCommand(input, bridge, executor);
+        await handleCommand(input, bridge, executor, appContext);
       } else {
         fs.appendFileSync(HISTORY_FILE, input + "\n");
         await handleChat(input, bridge);
@@ -93,7 +111,8 @@ export async function startRepl(): Promise<void> {
 async function handleCommand(
   input: string,
   bridge: PythonBridge,
-  executor: ReturnType<typeof createExecutor>
+  executor: ReturnType<typeof createExecutor>,
+  appContext: any
 ): Promise<void> {
   const parts = parseCommandArgs(input.slice(1));
   const cmd = parts[0];
@@ -106,7 +125,11 @@ async function handleCommand(
       break;
 
     case "search":
-    case "s":
+    case "s": {
+      if (!bridge.isStarted()) {
+        console.log(chalk.yellow("  Search requires the Python bridge (LLM)."));
+        break;
+      }
       if (!args) {
         console.log(chalk.yellow("Usage: /search <query>"));
         break;
@@ -115,9 +138,10 @@ async function handleCommand(
       const searchResults = await bridge.call("search", { query: args });
       renderCitations(searchResults.citations || []);
       break;
+    }
 
     case "exec":
-    case "x":
+    case "x": {
       if (!args) {
         console.log(chalk.yellow("Usage: /exec <command>"));
         break;
@@ -128,9 +152,14 @@ async function handleCommand(
       if (result.stderr) console.log(chalk.red(result.stderr));
       console.log(chalk.gray(`Exit code: ${result.exitCode}`));
       break;
+    }
 
     case "edit":
-    case "e":
+    case "e": {
+      if (!bridge.isStarted()) {
+        console.log(chalk.yellow("  Edit requires the Python bridge (LLM)."));
+        break;
+      }
       if (parsedArgs.length < 2) {
         console.log(chalk.yellow("Usage: /edit <file> <instruction>"));
         break;
@@ -148,9 +177,10 @@ async function handleCommand(
       await writeFile(file, edited.content);
       console.log(chalk.green(`Updated ${file}`));
       break;
+    }
 
     case "test":
-    case "t":
+    case "t": {
       const verifier = createVerifier({});
       const testResults = await verifier.runPipeline();
       for (const r of testResults) {
@@ -158,34 +188,44 @@ async function handleCommand(
         console.log(`${icon} ${r.stage}: ${r.passed ? "PASSED" : "FAILED"}`);
       }
       break;
+    }
 
 
-
-    case "plan":
-    case "p":
-      if (!args) {
-        console.log(chalk.yellow("Usage: /plan <task description>"));
-        break;
-      }
-      console.log(chalk.gray("Planning..."));
-      const plan = await bridge.call("llm_plan", { task: args });
-      renderMarkdown(plan.plan);
-      break;
 
     case "agent":
-    case "a":
+    case "a": {
+      if (!bridge.isStarted()) {
+        console.log(chalk.yellow("  Agent commands require the Python bridge (LLM)."));
+        break;
+      }
       if (!args) {
         console.log(chalk.yellow("Usage: /agent <task>"));
         break;
       }
       console.log(chalk.gray("Starting autonomous agent..."));
       const { AgentLoop } = await import("../agent/loop.js");
-      const loop = new AgentLoop(bridge);
+      const loop = new AgentLoop(bridge, appContext);
       await loop.run({ task: args, maxSteps: 15 });
       break;
+    }
+
+    case "plan":
+    case "p": {
+      if (!bridge.isStarted()) {
+        console.log(chalk.yellow("  Plan requires the Python bridge (LLM)."));
+        break;
+      }
+      if (!args) {
+        console.log(chalk.yellow("Usage: /plan <goal>"));
+        break;
+      }
+      console.log(chalk.gray(`Drafting plan for: ${args}`));
+      await bridge.call("agent_plan", { task: args }, 300000);
+      break;
+    }
 
     case "read":
-    case "r":
+    case "r": {
       if (!args) {
         console.log(chalk.yellow("Usage: /read <file>"));
         break;
@@ -193,9 +233,14 @@ async function handleCommand(
       const fileContent = await readFile(args);
       console.log(fileContent);
       break;
+    }
 
     case "fetch":
-    case "f":
+    case "f": {
+      if (!bridge.isStarted()) {
+        console.log(chalk.yellow("  Fetch requires the Python bridge."));
+        break;
+      }
       if (!args) {
         console.log(chalk.yellow("Usage: /fetch <url>"));
         break;
@@ -204,6 +249,7 @@ async function handleCommand(
       const fetched = await bridge.call("fetch_url", { url: args });
       console.log(fetched.content);
       break;
+    }
 
     case "exit":
     case "q":
@@ -217,6 +263,11 @@ async function handleCommand(
 }
 
 async function handleChat(input: string, bridge: PythonBridge): Promise<void> {
+  if (!bridge.isStarted()) {
+    console.log(chalk.yellow("  Python bridge is not running. LLM features are disabled."));
+    console.log(chalk.gray("  You can still use local tools like /exec, /read, etc."));
+    return;
+  }
   const response = await bridge.call("llm_chat", {
     messages: [{ role: "user", content: input }],
   });

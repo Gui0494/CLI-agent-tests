@@ -7,12 +7,29 @@ export interface ToolDefinition {
     schema: any;
 }
 
-export abstract class BaseTool<T> {
-    abstract readonly name: string;
-    abstract readonly description: string;
-    abstract readonly schema: z.ZodType<T>;
+export interface ToolResult<T = unknown> {
+    ok: boolean;
+    error?: string;
+    stdout?: string;
+    stderr?: string;
+    exit_code?: number;
+    content?: string;
+    truncated?: boolean;
+    files?: string[];
+    message?: string;
+    replacements?: number;
+    matches?: string;
+    count?: number;
+    details?: unknown;
+    data?: T;
+}
 
-    abstract execute(args: T): Promise<any>;
+export abstract class BaseTool<T> {
+    abstract get name(): string;
+    abstract get description(): string;
+    abstract get schema(): z.ZodType<T>;
+
+    abstract execute(args: T): Promise<ToolResult>;
 
     getToolDefinition(): ToolDefinition {
         const jsonSchema: any = zodToJsonSchema(this.schema, { target: "jsonSchema7" });

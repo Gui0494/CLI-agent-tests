@@ -1,0 +1,11 @@
+node_modules/
+tests/
+python/
+.env
+.env.*
+.git/
+*.log
+*.txt
+*.db
+.pytest_cache/
+coverage/

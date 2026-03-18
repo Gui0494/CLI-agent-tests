@@ -1,7 +1,7 @@
 """Tests for search orchestrator (mocked providers)."""
 
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 from aurex.citations.manager import Citation
 from aurex.search.orchestrator import SearchOrchestrator
 from aurex.cache.sqlite_cache import SQLiteCache
@@ -12,13 +12,12 @@ TEST_DB = "test_search_cache.db"
 
 
 @pytest.fixture
-def orchestrator():
+def orchestrator(monkeypatch):
     # Inject dummy keys so client wrappers don't throw errors
-    os.environ["TAVILY_API_KEY"] = os.environ.get("TAVILY_API_KEY", "dummy")
-    os.environ["SERPER_API_KEY"] = os.environ.get("SERPER_API_KEY", "dummy")
-    os.environ["FIRECRAWL_API_KEY"] = os.environ.get("FIRECRAWL_API_KEY", "dummy")
-    os.environ["JINA_API_KEY"] = os.environ.get("JINA_API_KEY", "dummy")
-    
+    # Using monkeypatch ensures env vars are restored after each test
+    for key in ["TAVILY_API_KEY", "SERPER_API_KEY", "FIRECRAWL_API_KEY", "JINA_API_KEY"]:
+        monkeypatch.setenv(key, os.environ.get(key, "dummy"))
+
     cache = SQLiteCache(db_path=TEST_DB, ttl=2)
     limiter = RateLimiter()
     orch = SearchOrchestrator(cache=cache, rate_limiter=limiter)

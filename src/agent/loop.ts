@@ -1,21 +1,12 @@
 import { PythonBridge } from "../bridge/python-bridge.js";
-import { ToolRegistry } from "./tools.js";
+
 import chalk from "chalk";
 import ora from "ora";
 import { z } from "zod";
+import { AppContext } from "../context.js";
+import { getHookEngine, HookEvent, HookAction } from "../hooks/engine.js";
 
-const AgentResponseSchema = z.discriminatedUnion("type", [
-    z.object({
-        type: z.literal("tool_call"),
-        id: z.string().optional(),
-        tool: z.string(),
-        args: z.record(z.unknown()),
-    }),
-    z.object({
-        type: z.literal("final"),
-        content: z.string(),
-    }),
-]);
+
 
 export interface AgentContext {
     task: string;
@@ -23,13 +14,21 @@ export interface AgentContext {
 }
 
 export class AgentLoop {
-    private registry: ToolRegistry;
-
-    constructor(private bridge: PythonBridge) {
-        this.registry = new ToolRegistry(bridge);
+    constructor(private bridge: PythonBridge, private appContext: AppContext) {
     }
 
     async run(context: AgentContext): Promise<void> {
+        const engine = getHookEngine();
+        const hookResult = await engine.emit(HookEvent.ON_SESSION_START, {
+            mode: this.appContext.modeManager.getMode(),
+            task: context.task
+        });
+
+        if (hookResult.action === HookAction.BLOCK) {
+            console.log(chalk.red(`\n⛔ Session blocked by hook: ${hookResult.reason}`));
+            return;
+        }
+
         const spinner = ora("Delegating task to Python Agent Engine...").start();
 
         try {

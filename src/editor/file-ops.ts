@@ -1,7 +1,7 @@
 import * as fs from "fs/promises";
 import * as path from "path";
+import { getWorkspaceSandbox } from "../security/sandbox.js";
 
-const WORKSPACE_ROOT = path.resolve(process.cwd());
 const IGNORED_DIRS = new Set([
   ".git",
   "node_modules",
@@ -12,12 +12,12 @@ const IGNORED_DIRS = new Set([
 ]);
 
 function resolveWorkspacePath(targetPath: string): string {
-  const resolved = path.resolve(WORKSPACE_ROOT, targetPath);
-  const relative = path.relative(WORKSPACE_ROOT, resolved);
-
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    throw new Error(`Path escapes workspace: ${targetPath}`);
-  }
+  const sandbox = getWorkspaceSandbox();
+  const root = sandbox.getRoot();
+  const resolved = path.resolve(root, targetPath);
+  
+  const err = sandbox.validate(resolved);
+  if (err) throw new Error(err);
 
   return resolved;
 }
@@ -41,30 +41,39 @@ export async function fileExists(filePath: string): Promise<boolean> {
   }
 }
 
-export async function listFiles(dir = ".", pattern?: RegExp): Promise<string[]> {
+export async function listFiles(dir = ".", pattern?: RegExp, maxDepth = 10, maxFiles = 5000): Promise<string[]> {
+  const sandbox = getWorkspaceSandbox();
+  const root = sandbox.getRoot();
   const startDir = resolveWorkspacePath(dir);
   const results: string[] = [];
 
-  async function walk(current: string): Promise<void> {
-    const entries = await fs.readdir(current, { withFileTypes: true });
+  async function walk(current: string, depth: number): Promise<void> {
+    if (depth > maxDepth || results.length >= maxFiles) return;
 
-    for (const entry of entries) {
-      const absolute = path.join(current, entry.name);
-      const relative = path.relative(WORKSPACE_ROOT, absolute);
+    try {
+      const entries = await fs.readdir(current, { withFileTypes: true });
 
-      if (entry.isDirectory()) {
-        if (IGNORED_DIRS.has(entry.name)) continue;
-        await walk(absolute);
-        continue;
+      for (const entry of entries) {
+        if (results.length >= maxFiles) break;
+        const absolute = path.join(current, entry.name);
+        const relative = path.relative(root, absolute);
+
+        if (entry.isDirectory()) {
+          if (IGNORED_DIRS.has(entry.name)) continue;
+          await walk(absolute, depth + 1);
+          continue;
+        }
+
+        if (!pattern || pattern.test(relative)) {
+          results.push(relative);
+        }
       }
-
-      if (!pattern || pattern.test(relative)) {
-        results.push(relative);
-      }
+    } catch {
+      // Ignore directories without read permissions
     }
   }
 
-  await walk(startDir);
+  await walk(startDir, 0);
   return results;
 }
 

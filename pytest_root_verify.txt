@@ -1,0 +1,52 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.11.9, pytest-9.0.2, pluggy-1.6.0
+rootdir: C:\Users\User\Downloads\CLI-agent-claude-cli-agent-planning-Z804h\CLI-agent-claude-cli-agent-planning-Z804h
+configfile: pytest.ini
+plugins: anyio-4.12.1, Faker-22.6.0, hypothesis-6.151.3, langsmith-0.6.6, asyncio-1.3.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 21 items
+
+python\test_ds_orchestrator.py F                                         [  4%]
+python\test_ds_search.py F                                               [  9%]
+python\test_gemma_tools.py F                                             [ 14%]
+python\tests\test_cache.py .......                                       [ 47%]
+python\tests\test_core.py ......                                         [ 76%]
+python\tests\test_llm.py ..                                              [ 85%]
+python\tests\test_search.py ...                                          [100%]
+
+================================== FAILURES ===================================
+____________________________ test_deepseek_search _____________________________
+async def functions are not natively supported.
+You need to install a suitable plugin for your async framework, for example:
+  - anyio
+  - pytest-asyncio
+  - pytest-tornasync
+  - pytest-trio
+  - pytest-twisted
+____________________________ test_deepseek_search _____________________________
+async def functions are not natively supported.
+You need to install a suitable plugin for your async framework, for example:
+  - anyio
+  - pytest-asyncio
+  - pytest-tornasync
+  - pytest-trio
+  - pytest-twisted
+______________________________ test_gemma_tools _______________________________
+async def functions are not natively supported.
+You need to install a suitable plugin for your async framework, for example:
+  - anyio
+  - pytest-asyncio
+  - pytest-tornasync
+  - pytest-trio
+  - pytest-twisted
+============================== warnings summary ===============================
+..\..\..\AppData\Local\Programs\Python\Python311\Lib\site-packages\_pytest\config\__init__.py:1575
+  C:\Users\User\AppData\Local\Programs\Python\Python311\Lib\site-packages\_pytest\config\__init__.py:1575: PytestConfigWarning: No files were found in testpaths; consider removing or adjusting your testpaths configuration. Searching recursively from the current directory instead.
+    self.args, self.args_source = self._decide_args(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED python/test_ds_orchestrator.py::test_deepseek_search - Failed: async d...
+FAILED python/test_ds_search.py::test_deepseek_search - Failed: async def fun...
+FAILED python/test_gemma_tools.py::test_gemma_tools - Failed: async def funct...
+=================== 3 failed, 18 passed, 1 warning in 3.54s ===================

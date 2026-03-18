@@ -1,13 +1,12 @@
 import pytest
 import asyncio
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import patch, MagicMock
 
 from aurex.core.tool_registry import ToolRegistry
 from aurex.core.context_manager import ContextManager
 from aurex.core.skill_loader import SkillLoader
 from aurex.core.agent_loop import AgentLoop
 from aurex.config.loader import AurexConfig
-from aurex.core.planner import PlannerFacade
 
 @pytest.fixture
 def tool_registry():
@@ -71,23 +70,24 @@ def test_tool_registry_allowlist():
         tr.register("unsafe_tool", dummy)
 
 @pytest.mark.asyncio
-async def test_agent_loop_flow():
+@patch('aurex.core.agent_loop.function_calling_run')
+async def test_agent_loop_flow(mock_fc_run):
+    # Mock function calling output
+    mock_fc_run.return_value = {
+        "response": "Hello world",
+        "tool_calls": [],
+        "rounds": 1
+    }
+    
     # Mocking dependencies
     config = AurexConfig()
-    planner = MagicMock(spec=PlannerFacade)
-    
-    # Planner decides to reply directly
-    planner.decide_next_action = AsyncMock(return_value={
-        "action": "reply",
-        "text": "Hello world"
-    })
     
     cm = ContextManager()
     tr = ToolRegistry()
     loader = MagicMock(spec=SkillLoader)
     loader.loaded_skills = {}
     
-    loop = AgentLoop(config, planner, cm, tr, loader)
+    loop = AgentLoop(config, cm, tr, loader)
     
     result = await loop.run("Say hello")
     
@@ -95,6 +95,6 @@ async def test_agent_loop_flow():
     assert result["output"] == "Hello world"
     
     # Context should have captured the step
-    trace = cm.get_short_term_context()
+    trace = cm.get_long_term_context()
     assert len(trace) > 0
-    assert trace[-1]["action"] == "completed"
+    assert trace[-1]["content"] == "Hello world"

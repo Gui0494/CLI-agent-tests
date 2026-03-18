@@ -15,6 +15,17 @@ from aurex.config.loader import LLMConfig
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 
+def _sanitize_surrogates(obj):
+    """Recursively removes utf-8 surrogate characters that crash httpx JSON encoder."""
+    if isinstance(obj, str):
+        return obj.encode('utf-8', 'replace').decode('utf-8')
+    elif isinstance(obj, dict):
+        return {k: _sanitize_surrogates(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_sanitize_surrogates(item) for item in obj]
+    return obj
+
+
 class OpenRouterClient:
     def __init__(self, rate_limiter: Optional[RateLimiter] = None, config: Optional[LLMConfig] = None):
         self.api_key = os.environ.get("OPENROUTER_API_KEY", "")
@@ -37,9 +48,6 @@ class OpenRouterClient:
         full_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         full_messages.extend(self.memory[-self.max_memory * 2 :])
         full_messages.extend(messages)
-
-        if not self.api_key:
-            raise ValueError("OPENROUTER_API_KEY is not set. Please set it in .env or your environment.")
 
         target_model = model or self.config.default_model
         temp = temperature if temperature is not None else self.config.temperature
@@ -71,12 +79,26 @@ class OpenRouterClient:
         max_tokens: int,
         timeout: float = 60.0,
     ) -> str:
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/aurex-ai",
-            "X-Title": "AurexAI",
-        }
+        if "deepseek" in model.lower() and "/" not in model:
+            api_key = os.environ.get("DEEPSEEK_API_KEY", self.api_key)
+            url = "https://api.deepseek.com/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            }
+            if not api_key:
+                raise ValueError("DEEPSEEK_API_KEY is not set.")
+        else:
+            api_key = os.environ.get("OPENROUTER_API_KEY", self.api_key)
+            url = "https://openrouter.ai/api/v1/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://github.com/aurex-ai",
+                "X-Title": "AurexAI",
+            }
+            if not api_key:
+                raise ValueError("OPENROUTER_API_KEY is not set.")
 
         payload = {
             "model": model,
@@ -85,8 +107,15 @@ class OpenRouterClient:
             "max_tokens": max_tokens,
         }
 
+        # Include DeepSeek Native Web Search Support if available in env
+        if os.environ.get("AUREX_DEEPSEEK_SEARCH") == "1" and "deepseek" in model.lower():
+            payload["search"] = True
+
+        # Sanitize surrogate characters that crash httpx JSON encoder (common on Windows)
+        payload = _sanitize_surrogates(payload)
+
         async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(OPENROUTER_URL, json=payload, headers=headers)
+            response = await client.post(url, json=payload, headers=headers)
             response.raise_for_status()
             data = response.json()
 

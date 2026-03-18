@@ -5,9 +5,9 @@ URL extraction: Jina Reader → Firecrawl
 """
 
 import sys
+import re
 from typing import Optional
 
-from pydantic import BaseModel
 
 from aurex.cache.sqlite_cache import SQLiteCache
 from aurex.cache.dedup import normalize_url, deduplicate_citations
@@ -16,7 +16,15 @@ from aurex.search.tavily_client import TavilyClient
 from aurex.search.jina_client import JinaClient
 from aurex.search.serper_client import SerperClient
 from aurex.search.firecrawl_client import FirecrawlClient
+from aurex.search.deepseek_client import DeepSeekSearchClient
 from aurex.citations.manager import Citation
+
+
+def sanitize_error(error_msg: str) -> str:
+    """Removes sensitive tokens like API keys from error messages."""
+    msg = re.sub(r'Bearer\s+[A-Za-z0-9_\-\.]+', 'Bearer [REDACTED]', error_msg)
+    msg = re.sub(r'sk-[A-Za-z0-9_\-\.]+', 'sk-[REDACTED]', msg)
+    return msg
 
 
 class SearchOrchestrator:
@@ -32,6 +40,7 @@ class SearchOrchestrator:
         self.jina = JinaClient(rate_limiter=self.rate_limiter)
         self.serper = SerperClient(rate_limiter=self.rate_limiter)
         self.firecrawl = FirecrawlClient(rate_limiter=self.rate_limiter)
+        self.deepseek_search = DeepSeekSearchClient(rate_limiter=self.rate_limiter)
 
     async def search(self, query: str, max_results: int = 5) -> list[Citation]:
         # Check cache first
@@ -41,8 +50,9 @@ class SearchOrchestrator:
 
         citations: list[Citation] = []
 
-        # Fallback chain: Tavily → Serper → Firecrawl
+        # Fallback chain: DeepSeek -> Tavily → Serper → Firecrawl
         providers = [
+            ("deepseek", self.deepseek_search.search),
             ("tavily", self.tavily.search),
             ("serper", self.serper.search),
             ("firecrawl", self.firecrawl.search),
@@ -54,7 +64,7 @@ class SearchOrchestrator:
                 citations = results
                 break
             except Exception as e:
-                print(f"[search] {name} failed: {e}", file=sys.stderr)
+                print(f"[search] {name} failed: {sanitize_error(str(e))}", file=sys.stderr)
                 continue
 
         # Deduplicate
@@ -83,7 +93,7 @@ class SearchOrchestrator:
             try:
                 content = await self.firecrawl.extract(url)
             except Exception as e:
-                content = f"Failed to fetch URL: {e}"
+                content = f"Failed to fetch URL: {sanitize_error(str(e))}"
 
         # Cache
         if content and not content.startswith("Failed"):

@@ -33,7 +33,7 @@ async def run(params: Dict[str, Any], registry: ToolRegistry) -> Dict[str, Any]:
     for citation in citations[:max_depth]:
         url = citation.get("url")
         title = citation.get("title", "Unknown Title")
-        snippet = citation.get("snippet", "")
+        snippet = citation.get("excerpt", "")
         
         # Deep read via fetch_url tool
         fetch_res = await registry.execute("fetch_url", {"url": url})

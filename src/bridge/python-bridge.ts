@@ -4,13 +4,18 @@ import * as path from "path";
 import * as os from "os";
 import { fileURLToPath } from "url";
 
-const __dirname = fileURLToPath(new URL(".", import.meta.url));
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 export class PythonBridge {
   private process: ChildProcess | null = null;
   private requestId = 0;
   private pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
   private buffer = "";
+
+  isStarted(): boolean {
+    return this.process !== null;
+  }
 
   async start(): Promise<void> {
     if (this.process) return;
@@ -32,7 +37,10 @@ export class PythonBridge {
     this.process.on("exit", (code) => {
       this.abortAll(new Error(`Python process exited with code ${code}`));
       this.process = null;
+      process.off("SIGINT", this.handleSigint);
     });
+
+    process.off("SIGINT", this.handleSigint);
 
     await new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => cleanup(new Error("Python bridge timeout")), 10000);
@@ -101,7 +109,7 @@ export class PythonBridge {
     this.pending.clear();
   }
 
-  async call(method: string, params: Record<string, unknown> = {}, timeoutMs = 60000): Promise<any> {
+  async call<T = any>(method: string, params: Record<string, unknown> = {}, timeoutMs = 60000): Promise<T> {
     if (!this.process) throw new Error("Python bridge not started");
 
     const id = ++this.requestId;
@@ -138,10 +146,12 @@ export class PythonBridge {
   stop(): void {
     process.off("SIGINT", this.handleSigint);
     if (this.process) {
-      this.process.kill("SIGTERM");
+      const p = this.process;
+      this.process = null;
+      try { p.kill("SIGTERM"); } catch (e) { /* ignore */ }
       setTimeout(() => {
-        if (this.process) this.process.kill("SIGKILL");
-      }, 2000);
+        try { p.kill("SIGKILL"); } catch (e) { /* ignore */ }
+      }, 2000).unref();
     }
   }
 
@@ -154,7 +164,11 @@ export class PythonBridge {
       if (!trimmed) continue;
 
       try {
-        const response = parseResponse(trimmed);
+        const jsonStr = trimmed;
+        // Strip out '{"ready": true}' or similar before standard parsing since they have been handled
+        if (jsonStr === '{"ready": true}') continue;
+        
+        const response = parseResponse(jsonStr);
         const handler = this.pending.get(response.id);
         if (handler) {
           this.pending.delete(response.id);

@@ -1,0 +1,48 @@
+name: function_calling
+description: >
+  Function Calling nativo usando tool_use estruturado das APIs.
+  Em vez de pedir ao LLM que retorne JSON como texto (frágil e propenso
+  a erros de parsing), usa o mecanismo nativo de tool_use do Claude e
+  function_calling do OpenAI/OpenRouter. O modelo retorna chamadas de
+  tool como objetos estruturados validados pela API.
+version: "1.0.0"
+priority: P0
+tools: []
+inputs:
+  messages:
+    type: array
+    required: true
+    description: Histórico de mensagens da conversa
+  tools:
+    type: array
+    required: true
+    description: Definições de tools no formato da API
+  model:
+    type: string
+    required: false
+    description: Modelo a usar
+  provider:
+    type: string
+    required: false
+    default: openrouter
+    description: "Provider: openrouter, anthropic"
+  max_rounds:
+    type: integer
+    required: false
+    default: 10
+    description: Máximo de rounds de tool calling
+outputs:
+  response:
+    type: string
+    description: Resposta final do modelo
+  tool_calls:
+    type: array
+    description: Histórico de todas as tool calls feitas
+  rounds:
+    type: integer
+    description: Número de rounds executados
+tags:
+  - function-calling
+  - tool-use
+  - core
+  - api

@@ -20,10 +20,14 @@ class ToolRegistry:
         self.require_allowlist = require_allowlist
         # If strict, default safe tools if none provided
         self._allowlist = set(allowed_tools) if allowed_tools is not None else set(["search_web", "fetch_url"])
+        self.permission_manager = None
 
-    def register(self, name: str, func: Callable, timeout_seconds: int = 30, 
+    def set_permission_manager(self, pm):
+        self.permission_manager = pm
+
+    def register(self, name: str, func: Callable, schema: Optional[Dict[str, Any]] = None, timeout_seconds: int = 30, 
                  requires_confirmation: bool = False, risk_level: str = "low"):
-        """Register a new atomic tool with security constraints."""
+        """Register a new atomic tool with security constraints and an optional schema."""
         if name in self._denylist:
             raise ValueError(f"Tool {name} is in the denylist and cannot be registered.")
             
@@ -32,11 +36,15 @@ class ToolRegistry:
             
         self._tools[name] = {
             "func": func,
+            "schema": schema,
             "timeout_seconds": timeout_seconds,
             "requires_confirmation": requires_confirmation,
             "risk_level": risk_level
         }
         logger.info(f"Registered {risk_level}-risk tool: {name}")
+
+    def get_all_tools(self) -> Dict[str, Dict[str, Any]]:
+        return self._tools
 
     def get_tool_metadata(self, name: str) -> Optional[Dict[str, Any]]:
         return self._tools.get(name)
@@ -50,18 +58,43 @@ class ToolRegistry:
             return {"error": f"Tool '{name}' not found in registry."}
 
         tool_meta = self._tools[name]
+        
+        # Check permissions
+        if self.permission_manager:
+            perm = await self.permission_manager.check_permission(name, params)
+            if not perm.get("allowed", False):
+                return {"error": "Requires explicit permission. User denied permission to execute tool."}
+
         func = tool_meta["func"]
         timeout_seconds = tool_meta.get("timeout_seconds", 30)
+
+        # Filter params to only include kwargs the function actually accepts.
+        # This prevents crashes when the LLM sends malformed arguments (e.g., {"raw": ...}).
+        try:
+            sig = inspect.signature(func)
+            accepted = set(sig.parameters.keys())
+            has_var_keyword = any(
+                p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+            )
+            if not has_var_keyword:
+                filtered_params = {k: v for k, v in params.items() if k in accepted}
+                if len(filtered_params) != len(params):
+                    dropped = set(params.keys()) - accepted
+                    logger.warning(f"Tool '{name}': dropped unexpected args {dropped}")
+            else:
+                filtered_params = params
+        except (ValueError, TypeError):
+            filtered_params = params
 
         try:
             # Check if func is async
             if inspect.iscoroutinefunction(func):
-                result = await asyncio.wait_for(func(**params), timeout=timeout_seconds)
+                result = await asyncio.wait_for(func(**filtered_params), timeout=timeout_seconds)
             else:
                 # Run sync functions in a thread pool to unblock the event loop
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 result = await asyncio.wait_for(
-                    loop.run_in_executor(None, lambda: func(**params)), 
+                    loop.run_in_executor(None, lambda: func(**filtered_params)), 
                     timeout=timeout_seconds
                 )
             

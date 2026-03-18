@@ -46,13 +46,14 @@ export async function runInSandbox(
       AutoRemove: true,
       ReadonlyRootfs: true,
       CapDrop: ["ALL"],
-      SecurityOpt: ["no-new-privileges"],
+      SecurityOpt: ["no-new-privileges", "apparmor=docker-default"],
       Binds: [
-        `${process.cwd()}:${cfg.workDir}:rw`,
+        `${process.cwd()}:${cfg.workDir}:ro`,
         // Also need temporary directory writable for many tools
       ],
       Tmpfs: {
         "/tmp": "rw,noexec,nosuid,size=64m",
+        "/output": "rw,size=128m",
       },
     },
     Tty: false,
@@ -89,17 +90,19 @@ export async function runInSandbox(
       stream.on("end", resolve);
     });
 
+    let timeoutId: NodeJS.Timeout;
     const timeoutPromise = new Promise<void>((resolve) => {
-      setTimeout(async () => {
+      timeoutId = setTimeout(async () => {
         timedOut = true;
         try {
           await container.kill();
-        } catch { }
+        } catch { /* empty */ }
         resolve();
       }, cfg.timeout);
     });
 
     await Promise.race([logPromise, timeoutPromise]);
+    clearTimeout(timeoutId!);
 
     const info = await container.inspect().catch(() => null);
     const exitCode = info?.State?.ExitCode ?? (timedOut ? 124 : 1);

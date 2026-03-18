@@ -1,0 +1,46 @@
+name: streaming_engine
+description: >
+  Motor de streaming token-by-token para respostas em tempo real.
+  Implementa SSE (Server-Sent Events) e chunked streaming para que
+  o usuário veja o pensamento do agent em tempo real, sem esperar
+  a resposta completa. Suporta streaming via stdout, callback ou SSE.
+version: "1.0.0"
+priority: P0
+tools: []
+inputs:
+  prompt:
+    type: string
+    required: true
+    description: O prompt/mensagem para enviar ao LLM
+  system_prompt:
+    type: string
+    required: false
+    description: System prompt opcional
+  model:
+    type: string
+    required: false
+    description: Modelo LLM a usar (override do default)
+  stream_mode:
+    type: string
+    required: false
+    default: stdout
+    description: "Modo de streaming: stdout, callback, sse"
+  temperature:
+    type: float
+    required: false
+    default: 0.7
+outputs:
+  full_response:
+    type: string
+    description: Resposta completa acumulada
+  token_count:
+    type: integer
+    description: Número total de tokens gerados
+  duration_ms:
+    type: float
+    description: Tempo total de geração
+tags:
+  - streaming
+  - llm
+  - core
+  - ux
