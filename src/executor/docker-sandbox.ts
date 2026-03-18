@@ -90,19 +90,25 @@ export async function runInSandbox(
       stream.on("end", resolve);
     });
 
-    let timeoutId: NodeJS.Timeout;
+    const ac = new AbortController();
     const timeoutPromise = new Promise<void>((resolve) => {
-      timeoutId = setTimeout(async () => {
+      const timeoutId = setTimeout(async () => {
+        if (ac.signal.aborted) return;
         timedOut = true;
         try {
           await container.kill();
-        } catch { /* empty */ }
+        } catch { /* container may already be stopped */ }
         resolve();
       }, cfg.timeout);
+      // If the log stream finishes first, cancel the timeout
+      ac.signal.addEventListener("abort", () => {
+        clearTimeout(timeoutId);
+        resolve();
+      }, { once: true });
     });
 
     await Promise.race([logPromise, timeoutPromise]);
-    clearTimeout(timeoutId!);
+    ac.abort();
 
     const info = await container.inspect().catch(() => null);
     const exitCode = info?.State?.ExitCode ?? (timedOut ? 124 : 1);

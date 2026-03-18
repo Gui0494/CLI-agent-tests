@@ -34,7 +34,7 @@ export async function aiReviewPR(
   }));
 
   // Ask LLM to review
-  const response = await bridge.call("llm_chat", {
+  const response = await bridge.call<{ content: string }>("llm_chat", {
     messages: [
       {
         role: "system",

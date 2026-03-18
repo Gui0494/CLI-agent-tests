@@ -8,6 +8,13 @@ import { getHookEngine, HookEvent, HookAction } from "../hooks/engine.js";
 
 
 
+export interface AgentRunResult {
+    error?: string;
+    status?: string;
+    skill_used?: string;
+    output?: unknown;
+}
+
 export interface AgentContext {
     task: string;
     maxSteps: number;
@@ -33,7 +40,7 @@ export class AgentLoop {
 
         try {
             const start = Date.now();
-            const result = await this.bridge.call("agent_run", {
+            const result = await this.bridge.call<AgentRunResult>("agent_run", {
                 user_input: context.task,
                 max_steps: context.maxSteps
             }, 300000); // 5 min timeout for deep agent runs
@@ -46,6 +53,18 @@ export class AgentLoop {
             }
 
             spinner.succeed(`Task complete [took ${elapsed}ms]`);
+
+            // Post-hoc honesty validation: audit the agent's output claims
+            const outputText = typeof result.output === "string"
+                ? result.output
+                : JSON.stringify(result.output ?? "");
+            const validation = this.appContext.honestyGuard.validateForMode(
+                outputText,
+                this.appContext.modeManager.getMode()
+            );
+            if (!validation.valid) {
+                console.log(chalk.yellow(`\n⚠ Honesty check: ${validation.violation}`));
+            }
 
             if (result.status === "success") {
                 if (result.skill_used) {

@@ -7,7 +7,7 @@ import { PythonBridge } from "../bridge/python-bridge.js";
 import { createExecutor } from "../executor/runner.js";
 import { createVerifier } from "../verifier/test-runner.js";
 import { readFile, writeFile } from "../editor/file-ops.js";
-import { renderMarkdown, renderCitations } from "./renderer.js";
+import { renderMarkdown, renderCitations, Citation } from "./renderer.js";
 import { COMMANDS, getHelp } from "./commands.js";
 import { createAppContext } from "../context.js";
 import { setupBridgeHandlers } from "./setup-bridge.js";
@@ -135,7 +135,7 @@ async function handleCommand(
         break;
       }
       console.log(chalk.gray("Searching..."));
-      const searchResults = await bridge.call("search", { query: args });
+      const searchResults = await bridge.call<{ citations?: Citation[] }>("search", { query: args });
       renderCitations(searchResults.citations || []);
       break;
     }
@@ -168,7 +168,7 @@ async function handleCommand(
       const instruction = parsedArgs.slice(1).join(" ");
       console.log(chalk.gray(`Editing ${file}...`));
       const content = await readFile(file);
-      const edited = await bridge.call("llm_chat", {
+      const edited = await bridge.call<{ content: string }>("llm_chat", {
         messages: [
           { role: "system", content: "You are a code editor. Return ONLY the modified file content." },
           { role: "user", content: `File: ${file}\nInstruction: ${instruction}\n\nContent:\n${content}` },
@@ -246,7 +246,7 @@ async function handleCommand(
         break;
       }
       console.log(chalk.gray("Fetching..."));
-      const fetched = await bridge.call("fetch_url", { url: args });
+      const fetched = await bridge.call<{ content: string }>("fetch_url", { url: args });
       console.log(fetched.content);
       break;
     }
@@ -268,7 +268,7 @@ async function handleChat(input: string, bridge: PythonBridge): Promise<void> {
     console.log(chalk.gray("  You can still use local tools like /exec, /read, etc."));
     return;
   }
-  const response = await bridge.call("llm_chat", {
+  const response = await bridge.call<{ content: string }>("llm_chat", {
     messages: [{ role: "user", content: input }],
   });
   renderMarkdown(response.content);

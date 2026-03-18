@@ -18,8 +18,14 @@ export async function searchCodeHybrid(
   owner: string,
   repo: string
 ): Promise<CodeSearchResult[]> {
-  // Try local search first (faster, no API cost)
-  const localResults = await localSearch(query);
+  // Run local and GitHub searches in parallel
+  const [localSettled, githubSettled] = await Promise.allSettled([
+    localSearch(query),
+    octokit.search.code({ q: `${query} repo:${owner}/${repo}`, per_page: 10 }),
+  ]);
+
+  // Prefer local results
+  const localResults = localSettled.status === "fulfilled" ? localSettled.value : [];
   if (localResults.length > 0) {
     return localResults.map((r) => ({
       file: r.file,
@@ -29,20 +35,15 @@ export async function searchCodeHybrid(
     }));
   }
 
-  // Fallback to GitHub search API
-  try {
-    const { data } = await octokit.search.code({
-      q: `${query} repo:${owner}/${repo}`,
-      per_page: 10,
-    });
-
-    return data.items.map((item) => ({
+  // Fall back to GitHub results
+  if (githubSettled.status === "fulfilled") {
+    return githubSettled.value.data.items.map((item) => ({
       file: item.path,
       content: item.name,
       source: "github" as const,
       url: item.html_url,
     }));
-  } catch {
-    return [];
   }
+
+  return [];
 }

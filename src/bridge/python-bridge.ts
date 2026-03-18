@@ -8,9 +8,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export class PythonBridge {
+  private static activeInstances = new Set<PythonBridge>();
+  private static globalSigintHandler: (() => void) | null = null;
+
   private process: ChildProcess | null = null;
   private requestId = 0;
-  private pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
+  private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
   private buffer = "";
 
   isStarted(): boolean {
@@ -37,10 +40,8 @@ export class PythonBridge {
     this.process.on("exit", (code) => {
       this.abortAll(new Error(`Python process exited with code ${code}`));
       this.process = null;
-      process.off("SIGINT", this.handleSigint);
+      PythonBridge.unregisterInstance(this);
     });
-
-    process.off("SIGINT", this.handleSigint);
 
     await new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => cleanup(new Error("Python bridge timeout")), 10000);
@@ -94,12 +95,28 @@ export class PythonBridge {
       this.process!.stdout!.on("data", onReadyData);
     });
 
-    process.on("SIGINT", this.handleSigint);
+    PythonBridge.registerInstance(this);
   }
 
-  private handleSigint = () => {
-    this.abortAll(new Error("User interrupted operation"));
-    this.stop();
+  private static registerInstance(instance: PythonBridge): void {
+    PythonBridge.activeInstances.add(instance);
+    if (!PythonBridge.globalSigintHandler) {
+      PythonBridge.globalSigintHandler = () => {
+        for (const inst of PythonBridge.activeInstances) {
+          inst.abortAll(new Error("User interrupted operation"));
+          inst.stop();
+        }
+      };
+      process.on("SIGINT", PythonBridge.globalSigintHandler);
+    }
+  }
+
+  private static unregisterInstance(instance: PythonBridge): void {
+    PythonBridge.activeInstances.delete(instance);
+    if (PythonBridge.activeInstances.size === 0 && PythonBridge.globalSigintHandler) {
+      process.off("SIGINT", PythonBridge.globalSigintHandler);
+      PythonBridge.globalSigintHandler = null;
+    }
   }
 
   private abortAll(error: Error) {
@@ -109,7 +126,7 @@ export class PythonBridge {
     this.pending.clear();
   }
 
-  async call<T = any>(method: string, params: Record<string, unknown> = {}, timeoutMs = 60000): Promise<T> {
+  async call<T = unknown>(method: string, params: Record<string, unknown> = {}, timeoutMs = 60000): Promise<T> {
     if (!this.process) throw new Error("Python bridge not started");
 
     const id = ++this.requestId;
@@ -126,7 +143,7 @@ export class PythonBridge {
       this.pending.set(id, {
         resolve: (value) => {
           clearTimeout(timeout);
-          resolve(value);
+          resolve(value as T);
         },
         reject: (error) => {
           clearTimeout(timeout);
@@ -144,7 +161,7 @@ export class PythonBridge {
   }
 
   stop(): void {
-    process.off("SIGINT", this.handleSigint);
+    PythonBridge.unregisterInstance(this);
     if (this.process) {
       const p = this.process;
       this.process = null;

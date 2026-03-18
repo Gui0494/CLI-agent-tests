@@ -75,7 +75,7 @@ program
         process.exit(1);
       }
 
-      const result = await bridge.call("llm_chat", {
+      const result = await bridge.call<{ content: string }>("llm_chat", {
         messages: [
           {
             role: "system",
@@ -152,7 +152,7 @@ program
     const bridge = new PythonBridge();
     try {
       await bridge.start();
-      const plan = await bridge.call("llm_plan", {
+      const plan = await bridge.call<{ plan: string }>("llm_plan", {
         task: taskParts.join(" "),
       });
       console.log(plan.plan);
