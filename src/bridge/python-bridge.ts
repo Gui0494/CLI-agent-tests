@@ -1,4 +1,5 @@
 import { spawn, ChildProcess } from "child_process";
+import { EventEmitter } from "events";
 import { createRequest, parseResponse, JsonRpcResponse } from "./protocol.js";
 import * as path from "path";
 import * as os from "os";
@@ -7,7 +8,22 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-export class PythonBridge {
+export interface BridgeRequest {
+  jsonrpc: string;
+  id: number;
+  method: string;
+  params: Record<string, unknown>;
+}
+
+// Minimal EventEmitter type shim (no @types/node in this project)
+declare class NodeEventEmitter {
+  on(event: string | symbol, listener: (...args: unknown[]) => void): this;
+  emit(event: string | symbol, ...args: unknown[]): boolean;
+  off(event: string | symbol, listener: (...args: unknown[]) => void): this;
+}
+const TypedEventEmitter = EventEmitter as unknown as { new(): NodeEventEmitter };
+
+export class PythonBridge extends TypedEventEmitter {
   private static activeInstances = new Set<PythonBridge>();
   private static globalSigintHandler: (() => void) | null = null;
 
@@ -172,6 +188,18 @@ export class PythonBridge {
     }
   }
 
+  /**
+   * Send a JSON-RPC response back to the Python process.
+   * Used when Python sends a request (e.g., run_node_tool, permission_request).
+   */
+  sendResponse(id: number, result?: unknown, error?: { code: number; message: string }): void {
+    if (!this.process?.stdin) return;
+    const payload = error
+      ? { jsonrpc: "2.0", id, error }
+      : { jsonrpc: "2.0", id, result: result ?? null };
+    this.process.stdin.write(JSON.stringify(payload) + "\n");
+  }
+
   private processBuffer(): void {
     const lines = this.buffer.split("\n");
     this.buffer = lines.pop() || "";
@@ -181,11 +209,19 @@ export class PythonBridge {
       if (!trimmed) continue;
 
       try {
-        const jsonStr = trimmed;
-        // Strip out '{"ready": true}' or similar before standard parsing since they have been handled
-        if (jsonStr === '{"ready": true}') continue;
-        
-        const response = parseResponse(jsonStr);
+        // Skip ready signals (already handled during init)
+        if (trimmed === '{"ready": true}') continue;
+
+        const parsed = JSON.parse(trimmed);
+
+        // Detect incoming requests from Python (has method field)
+        if (parsed.method && typeof parsed.method === "string") {
+          this.emit("request", parsed as BridgeRequest);
+          continue;
+        }
+
+        // Otherwise treat as response to our call
+        const response = parseResponse(trimmed);
         const handler = this.pending.get(response.id);
         if (handler) {
           this.pending.delete(response.id);
