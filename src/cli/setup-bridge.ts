@@ -1,6 +1,6 @@
 import * as readline from "readline";
 import chalk from "chalk";
-import { PythonBridge } from "../bridge/python-bridge.js";
+import { PythonBridge, BridgeRequest } from "../bridge/python-bridge.js";
 import { createExecutor, ExecutorConfig } from "../executor/runner.js";
 import { AppContext } from "../context.js";
 import {
@@ -19,7 +19,7 @@ export function setupBridgeHandlers(
   rl?: readline.Interface,
   executorOptions?: ExecutorConfig
 ) {
-    const bridge = bridgeArg as any;
+    const bridge = bridgeArg;
 
     const ask = (q: string): Promise<string> => {
         return new Promise((resolve) => {
@@ -52,10 +52,11 @@ export function setupBridgeHandlers(
         }
     });
 
-    bridge.on("request", async (req: any) => {
+    bridge.on("request", async (...args: unknown[]) => {
+        const req = args[0] as BridgeRequest;
         if (req.method === "permission_request") {
             bridge.emit("pause_spinner");
-            const { action, risk_level, reason } = req.params;
+            const { action, risk_level, reason } = req.params as { action: string; risk_level: string; reason: string };
             const color = risk_level === "critical" ? chalk.red : (risk_level === "high" ? chalk.redBright : chalk.yellow);
 
             console.log(`\n${color(`⚠ CONFIRMAÇÃO NECESSÁRIA [${risk_level.toUpperCase()}]`)}`);
@@ -67,7 +68,8 @@ export function setupBridgeHandlers(
             bridge.sendResponse(req.id, { allowed });
             bridge.emit("resume_spinner");
         } else if (req.method === "run_node_tool") {
-            const { tool_name, tool_args } = req.params;
+            const { tool_name, tool_args: raw_args } = req.params as { tool_name: string; tool_args: Record<string, unknown> };
+            const tool_args = raw_args as any; // Args are validated by Python before dispatch
             bridge.emit("pause_spinner");
             try {
                 if (!appContext.modeManager.isToolAllowed(tool_name)) {
@@ -86,10 +88,10 @@ export function setupBridgeHandlers(
                         result = await handleListFiles(tool_args);
                         break;
                     case "edit_file":
-                        result = await handleEditFile(tool_args, ask);
+                        result = await handleEditFile(tool_args, ask, appContext);
                         break;
                     case "write_file":
-                        result = await handleWriteFile(tool_args, ask);
+                        result = await handleWriteFile(tool_args, ask, appContext);
                         break;
                     case "grep":
                         result = await handleGrep(tool_args);

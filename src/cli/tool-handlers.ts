@@ -53,7 +53,7 @@ export async function handleListFiles(tool_args: ListFilesArgs): Promise<ToolRes
     return { ok: true, files: files.slice(0, 500), truncated: files.length > 500 };
 }
 
-export async function handleEditFile(tool_args: EditFileArgs, ask: AskFunction): Promise<ToolResult> {
+export async function handleEditFile(tool_args: EditFileArgs, ask: AskFunction, appContext?: AppContext): Promise<ToolResult> {
     const filePath = tool_args.path;
     const oldText = tool_args.old_text;
     const newText = tool_args.new_text;
@@ -106,11 +106,20 @@ export async function handleEditFile(tool_args: EditFileArgs, ask: AskFunction):
     if (!allowed) {
         return { ok: false, error: "User rejected the patch" };
     }
+    if (appContext) {
+        const preWrite = await getHookEngine().emit(HookEvent.PRE_WRITE, { mode: appContext.modeManager.getMode(), filePath: tool_args.path });
+        if (preWrite.action === HookAction.BLOCK) {
+            return { ok: false, error: `Blocked by hook: ${preWrite.reason}` };
+        }
+    }
     await writeFile(filePath, updated);
+    if (appContext) {
+        await getHookEngine().emit(HookEvent.POST_EDIT, { mode: appContext.modeManager.getMode(), filePath: tool_args.path });
+    }
     return { ok: true, message: `Edited ${filePath}`, replacements: tool_args.replace_all ? occurrences : 1 };
 }
 
-export async function handleWriteFile(tool_args: WriteFileArgs, ask: AskFunction): Promise<ToolResult> {
+export async function handleWriteFile(tool_args: WriteFileArgs, ask: AskFunction, appContext?: AppContext): Promise<ToolResult> {
     let content = "";
     try { content = await readFile(tool_args.path); } catch (e) {}
 
@@ -156,6 +165,12 @@ export async function handleWriteFile(tool_args: WriteFileArgs, ask: AskFunction
 
     if (!allowed) {
         return { ok: false, error: "User rejected the file write" };
+    }
+    if (appContext) {
+        const preWrite = await getHookEngine().emit(HookEvent.PRE_WRITE, { mode: appContext.modeManager.getMode(), filePath: tool_args.path });
+        if (preWrite.action === HookAction.BLOCK) {
+            return { ok: false, error: `Blocked by hook: ${preWrite.reason}` };
+        }
     }
     await writeFile(tool_args.path, tool_args.content);
     return { ok: true, message: `Created/Overwritten ${tool_args.path}` };

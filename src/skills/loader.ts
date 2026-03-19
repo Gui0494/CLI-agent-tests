@@ -1,9 +1,16 @@
 /**
  * loader.ts — Skill loader for AurexAI CLI Agent
  *
+ * @deprecated Not yet connected to REPL or AgentLoop. TODO: Wire SkillLoader
+ * into AppContext for /skill commands.
+ *
  * Loads skill definitions from YAML/MD files in the skills/ directory.
  * Supports both built-in skills (docs/architecture-reference/skills/)
  * and custom project skills (skills/ in workspace).
+ *
+ * @deprecated Not yet connected to REPL or AgentLoop.
+ * TODO: Wire SkillLoader into AppContext for /skill commands in the REPL.
+ * The loader is fully implemented and tested but no production code path uses it.
  *
  * Reference: docs/architecture-reference/specs/skill-user.md
  */

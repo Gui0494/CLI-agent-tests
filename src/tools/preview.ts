@@ -1,8 +1,15 @@
 /**
  * preview.ts — Preview manager for AurexAI CLI Agent
  *
+ * @deprecated Not yet connected to REPL. TODO: Wire PreviewManager into
+ * /preview command.
+ *
  * Detects project type, finds free port, spawns dev server,
  * waits for it to be ready, and manages lifecycle.
+ *
+ * @deprecated Not yet connected to REPL.
+ * TODO: Wire PreviewManager into a /preview REPL command.
+ * The manager is fully implemented and tested but no production code path uses it.
  *
  * Reference: docs/architecture-reference/prompts/preview.md
  */

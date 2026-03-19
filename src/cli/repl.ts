@@ -11,6 +11,11 @@ import { renderMarkdown, renderCitations, Citation } from "./renderer.js";
 import { COMMANDS, getHelp } from "./commands.js";
 import { createAppContext } from "../context.js";
 import { setupBridgeHandlers } from "./setup-bridge.js";
+import { getHookEngine, HookEvent } from "../hooks/engine.js";
+import { preShellHook } from "../hooks/rules/pre-shell.js";
+import { postEditHook } from "../hooks/rules/post-edit.js";
+import { workspaceSandboxHook } from "../hooks/rules/workspace-sandbox.js";
+import { runDoctor, printDoctorResult } from "../hooks/rules/on-session-start.js";
 
 const CONFIG_DIR = path.join(os.homedir(), ".config", "aurex");
 if (!fs.existsSync(CONFIG_DIR)) {
@@ -56,6 +61,18 @@ export async function startRepl(): Promise<void> {
   });
 
   const appContext = createAppContext();
+
+  // Register hook rules
+  const hookEngine = getHookEngine();
+  hookEngine.register("pre-shell-blocklist", HookEvent.PRE_SHELL, preShellHook, 10);
+  hookEngine.register("workspace-sandbox", HookEvent.PRE_WRITE, workspaceSandboxHook, 10);
+  hookEngine.register("post-edit-formatter", HookEvent.POST_EDIT, postEditHook, 50);
+
+  // Run doctor checks and populate session memory
+  const doctorResult = await runDoctor();
+  appContext.session.doctorResult = doctorResult;
+  printDoctorResult(doctorResult);
+  await appContext.session.loadProjectContext();
 
   appContext.modeManager.setConfirmFunction(async (msg) => {
     return new Promise<boolean>((resolve) => {
