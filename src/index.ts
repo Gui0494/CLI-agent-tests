@@ -49,7 +49,7 @@ program
     const bridge = new PythonBridge();
     try {
       await bridge.start();
-      const results = await bridge.call("search", {
+      const results = await bridge.call<{ citations?: unknown[]; [key: string]: unknown }>("search", {
         query: queryParts.join(" "),
         max_results: parseInt(opts.maxResults),
       });

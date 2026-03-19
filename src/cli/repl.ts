@@ -237,7 +237,7 @@ async function handleCommand(
         break;
       }
       console.log(chalk.gray(`Drafting plan for: ${args}`));
-      await bridge.call("agent_plan", { task: args }, 300000);
+      await bridge.call<{ plan?: string }>("agent_plan", { task: args }, 300000);
       break;
     }
 
