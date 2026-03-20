@@ -2,7 +2,6 @@
  * Unit tests for PreviewManager
  */
 import { PreviewManager } from "../../src/tools/preview.js";
-import { jest } from "@jest/globals";
 
 describe("PreviewManager", () => {
   jest.setTimeout(30000);
