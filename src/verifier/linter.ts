@@ -1,5 +1,5 @@
 import { createExecutor } from "../executor/runner.js";
-import { fileExists } from "../editor/file-ops.js";
+import { fileExists, readFile } from "../editor/file-ops.js";
 
 async function canRun(
   executor: ReturnType<typeof createExecutor>,
@@ -7,6 +7,18 @@ async function canRun(
 ): Promise<boolean> {
   const result = await executor.run(command);
   return result.exitCode === 0;
+}
+
+async function hasNpmScript(
+  _executor: ReturnType<typeof createExecutor>,
+  scriptName: string
+): Promise<boolean> {
+  try {
+    const pkg = JSON.parse(await readFile("package.json"));
+    return !!(pkg.scripts && pkg.scripts[scriptName]);
+  } catch {
+    return false;
+  }
 }
 
 export async function runLinter(
@@ -20,7 +32,9 @@ export async function runLinter(
 
   switch (projectType) {
     case "node":
-      if (await fileExists("eslint.config.js") || await fileExists(".eslintrc.js") || await fileExists(".eslintrc.json")) {
+      if (await hasNpmScript(executor, "lint")) {
+        command = "npm run lint";
+      } else if (await fileExists("eslint.config.js") || await fileExists(".eslintrc.js") || await fileExists(".eslintrc.json")) {
         command = "npx eslint . --max-warnings=0";
       }
       break;
@@ -32,6 +46,31 @@ export async function runLinter(
         command = `${py} -m flake8 python`;
       }
       break;
+
+    case "hybrid": {
+      // Run both Node and Python linters
+      let nodeCmd: string | null = null;
+      let pyCmd: string | null = null;
+
+      if (await hasNpmScript(executor, "lint")) {
+        nodeCmd = "npm run lint";
+      } else if (await fileExists("eslint.config.js") || await fileExists(".eslintrc.js") || await fileExists(".eslintrc.json")) {
+        nodeCmd = "npx eslint . --max-warnings=0";
+      }
+
+      if (await canRun(executor, `${py} -m ruff --version`)) {
+        pyCmd = `${py} -m ruff check python`;
+      } else if (await canRun(executor, `${py} -m flake8 --version`)) {
+        pyCmd = `${py} -m flake8 python`;
+      }
+
+      if (nodeCmd && pyCmd) {
+        command = `${nodeCmd} && ${pyCmd}`;
+      } else {
+        command = nodeCmd || pyCmd;
+      }
+      break;
+    }
   }
 
   if (!command) {

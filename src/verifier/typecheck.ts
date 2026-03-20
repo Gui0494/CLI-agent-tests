@@ -1,5 +1,5 @@
 import { createExecutor } from "../executor/runner.js";
-import { fileExists } from "../editor/file-ops.js";
+import { fileExists, readFile } from "../editor/file-ops.js";
 
 async function canRun(
   executor: ReturnType<typeof createExecutor>,
@@ -7,6 +7,18 @@ async function canRun(
 ): Promise<boolean> {
   const result = await executor.run(command);
   return result.exitCode === 0;
+}
+
+async function hasNpmScript(
+  _executor: ReturnType<typeof createExecutor>,
+  scriptName: string
+): Promise<boolean> {
+  try {
+    const pkg = JSON.parse(await readFile("package.json"));
+    return !!(pkg.scripts && pkg.scripts[scriptName]);
+  } catch {
+    return false;
+  }
 }
 
 export async function runTypecheck(
@@ -20,7 +32,9 @@ export async function runTypecheck(
 
   switch (projectType) {
     case "node":
-      if (await fileExists("tsconfig.json")) {
+      if (await hasNpmScript(executor, "typecheck")) {
+        command = "npm run typecheck";
+      } else if (await fileExists("tsconfig.json")) {
         command = "npx tsc --noEmit";
       }
       break;
@@ -32,6 +46,30 @@ export async function runTypecheck(
         command = `${py} -m pyright python`;
       }
       break;
+
+    case "hybrid": {
+      let nodeCmd: string | null = null;
+      let pyCmd: string | null = null;
+
+      if (await hasNpmScript(executor, "typecheck")) {
+        nodeCmd = "npm run typecheck";
+      } else if (await fileExists("tsconfig.json")) {
+        nodeCmd = "npx tsc --noEmit";
+      }
+
+      if (await canRun(executor, `${py} -m mypy --version`)) {
+        pyCmd = `${py} -m mypy python`;
+      } else if (await canRun(executor, `${py} -m pyright --version`)) {
+        pyCmd = `${py} -m pyright python`;
+      }
+
+      if (nodeCmd && pyCmd) {
+        command = `${nodeCmd} && ${pyCmd}`;
+      } else {
+        command = nodeCmd || pyCmd;
+      }
+      break;
+    }
   }
 
   if (!command) {

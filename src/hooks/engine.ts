@@ -191,19 +191,24 @@ export class HookEngine {
 
   private async executeWithTimeout(hook: RegisteredHook, context: HookContext): Promise<HookResult> {
     const startTime = Date.now();
+    let timeoutId: ReturnType<typeof setTimeout>;
 
     const timeoutPromise = new Promise<HookResult>((_, reject) => {
-      setTimeout(() => {
+      timeoutId = setTimeout(() => {
         reject(new Error(`Hook "${hook.name}" timed out after ${this.config.defaultTimeoutMs}ms`));
       }, this.config.defaultTimeoutMs);
     });
 
-    const handlerPromise = Promise.resolve(hook.handler(context)).then(result => {
-      result.executionTimeMs = Date.now() - startTime;
-      return result;
-    });
+    try {
+      const handlerPromise = Promise.resolve(hook.handler(context)).then(result => {
+        result.executionTimeMs = Date.now() - startTime;
+        return result;
+      });
 
-    return Promise.race([handlerPromise, timeoutPromise]);
+      return await Promise.race([handlerPromise, timeoutPromise]);
+    } finally {
+      clearTimeout(timeoutId!);
+    }
   }
 
   private handleHookError(hook: RegisteredHook, error: Error): HookResult {

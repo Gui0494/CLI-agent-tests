@@ -104,7 +104,7 @@ describe("getToolPermissionClass", () => {
     expect(getToolPermissionClass("git_push")).toBe(PermissionClass.GIT_REMOTE);
   });
 
-  it("defaults to SHELL_SAFE for unknown tools", () => {
-    expect(getToolPermissionClass("unknown_tool")).toBe(PermissionClass.SHELL_SAFE);
+  it("defaults to SHELL_UNSAFE for unknown tools (conservative policy)", () => {
+    expect(getToolPermissionClass("unknown_tool")).toBe(PermissionClass.SHELL_UNSAFE);
   });
 });
