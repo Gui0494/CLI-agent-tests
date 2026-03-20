@@ -7,7 +7,6 @@ import {
   SubagentTask,
 } from "../../src/subagents/definitions.js";
 import { SubagentRunner } from "../../src/subagents/runner.js";
-import { jest } from "@jest/globals";
 
 describe("SUBAGENT_DEFINITIONS", () => {
   it("should have 4 definitions", () => {

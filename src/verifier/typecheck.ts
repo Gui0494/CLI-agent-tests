@@ -1,25 +1,6 @@
 import { createExecutor } from "../executor/runner.js";
-import { fileExists, readFile } from "../editor/file-ops.js";
-
-async function canRun(
-  executor: ReturnType<typeof createExecutor>,
-  command: string
-): Promise<boolean> {
-  const result = await executor.run(command);
-  return result.exitCode === 0;
-}
-
-async function hasNpmScript(
-  _executor: ReturnType<typeof createExecutor>,
-  scriptName: string
-): Promise<boolean> {
-  try {
-    const pkg = JSON.parse(await readFile("package.json"));
-    return !!(pkg.scripts && pkg.scripts[scriptName]);
-  } catch {
-    return false;
-  }
-}
+import { fileExists } from "../editor/file-ops.js";
+import { canRun, hasNpmScript } from "./utils.js";
 
 export async function runTypecheck(
   projectType: string,
