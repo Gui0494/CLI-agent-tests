@@ -71,34 +71,35 @@ export async function handleEditFile(tool_args: EditFileArgs, ask: AskFunction, 
     const updated = tool_args.replace_all ? content.split(oldText).join(newText) : content.replace(oldText, newText);
     const diffLines = diff.diffLines(content, updated);
     let additions = 0, deletions = 0;
-    diffLines.forEach((part: any) => {
+    for (const part of diffLines) {
         const lines = part.value.split('\n').filter((l: string) => l.length > 0).length;
         if (part.added) additions += lines;
         if (part.removed) deletions += lines;
-    });
+    }
 
     console.log(`\n${chalk.cyan(`📄 Patch ready for ${filePath}`)} ${chalk.green(`+${additions}`)} ${chalk.red(`-${deletions}`)}`);
 
     let allowed = false;
-    while (true) {
+    let answered = false;
+    while (!answered) {
         const answer = await ask(`  [a] apply   [d] view diff   [x] cancel: `);
         const cmd = answer.trim().toLowerCase();
 
         if (cmd === "a" || cmd === "y" || cmd === "yes") {
             allowed = true;
-            break;
+            answered = true;
         } else if (cmd === "x" || cmd === "n" || cmd === "no") {
             allowed = false;
-            break;
+            answered = true;
         } else if (cmd === "d" || cmd === "v") {
             console.log(`\n${chalk.cyan(`📄 Diff:`)}`);
-            diffLines.forEach((part: any) => {
+            for (const part of diffLines) {
                 const color = part.added ? chalk.green : part.removed ? chalk.red : chalk.gray;
                 const prefix = part.added ? "+ " : part.removed ? "- " : "  ";
                 const lines = part.value.split('\n');
                 if (lines[lines.length - 1] === '') lines.pop();
-                lines.forEach((line: string) => console.log(color(prefix + line)));
-            });
+                for (const line of lines) { console.log(color(prefix + line)); }
+            }
             console.log();
         }
     }
@@ -121,44 +122,45 @@ export async function handleEditFile(tool_args: EditFileArgs, ask: AskFunction, 
 
 export async function handleWriteFile(tool_args: WriteFileArgs, ask: AskFunction, appContext?: AppContext): Promise<ToolResult> {
     let content = "";
-    try { content = await readFile(tool_args.path); } catch (e) {}
+    try { content = await readFile(tool_args.path); } catch { /* file may not exist yet — treat as new file */ }
 
     const diffLines = diff.diffLines(content, tool_args.content);
     let additions = 0, deletions = 0;
-    diffLines.forEach((part: any) => {
+    for (const part of diffLines) {
         const lines = part.value.split('\n').filter((l: string) => l.length > 0).length;
         if (part.added) additions += lines;
         if (part.removed) deletions += lines;
-    });
+    }
 
     console.log(`\n${chalk.cyan(`📄 File write ready for ${tool_args.path}`)} ${chalk.green(`+${additions}`)} ${chalk.red(`-${deletions}`)}`);
 
     let allowed = false;
-    while (true) {
+    let answered = false;
+    while (!answered) {
         const answer = await ask(`  [a] apply   [d] view diff   [x] cancel: `);
         const cmd = answer.trim().toLowerCase();
 
         if (cmd === "a" || cmd === "y" || cmd === "yes") {
             allowed = true;
-            break;
+            answered = true;
         } else if (cmd === "x" || cmd === "n" || cmd === "no") {
             allowed = false;
-            break;
+            answered = true;
         } else if (cmd === "d" || cmd === "v") {
             console.log(`\n${chalk.cyan(`📄 Diff:`)}`);
-            diffLines.forEach((part: any) => {
+            for (const part of diffLines) {
                 const color = part.added ? chalk.green : part.removed ? chalk.red : chalk.gray;
                 const prefix = part.added ? "+ " : part.removed ? "- " : "  ";
                 const lines = part.value.split('\n');
                 if (lines[lines.length - 1] === '') lines.pop();
                 if (part.added || part.removed || lines.length <= 10) {
-                    lines.forEach((line: string) => console.log(color(prefix + line)));
+                    for (const line of lines) { console.log(color(prefix + line)); }
                 } else {
-                    lines.slice(0, 3).forEach((line: string) => console.log(color(prefix + line)));
+                    for (const line of lines.slice(0, 3)) { console.log(color(prefix + line)); }
                     console.log(chalk.gray("  ..."));
-                    lines.slice(-3).forEach((line: string) => console.log(color(prefix + line)));
+                    for (const line of lines.slice(-3)) { console.log(color(prefix + line)); }
                 }
-            });
+            }
             console.log();
         }
     }

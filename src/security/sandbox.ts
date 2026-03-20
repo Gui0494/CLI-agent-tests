@@ -30,6 +30,11 @@ export class WorkspaceSandbox {
    * Resolves the path and checks if it starts with the workspace root.
    */
   isInsideWorkspace(filePath: string): boolean {
+    // Reject Windows-style absolute paths when running on non-Windows
+    if (process.platform !== 'win32' && /^[A-Za-z]:[/\\]/.test(filePath)) {
+      return false;
+    }
+
     let resolved = path.resolve(filePath);
     try {
       resolved = fs.realpathSync(resolved);

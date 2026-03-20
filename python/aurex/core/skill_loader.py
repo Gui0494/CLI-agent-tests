@@ -6,7 +6,7 @@ import os
 import yaml
 import importlib.util
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -98,5 +98,5 @@ class SkillLoader:
             
         return True
 
-    def get_skill(self, name: str) -> Dict[str, Any]:
+    def get_skill(self, name: str) -> Optional[Dict[str, Any]]:
         return self.loaded_skills.get(name)

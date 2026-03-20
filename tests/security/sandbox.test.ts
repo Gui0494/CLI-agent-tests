@@ -41,7 +41,7 @@ describe("WorkspaceSandbox", () => {
   it("validate returns error string for invalid paths", () => {
     const result = sandbox.validate("/etc/passwd");
     expect(result).not.toBeNull();
-    expect(result).toContain("fora do workspace");
+    expect(result).toContain("outside the workspace");
   });
 
   it("relativePath works correctly", () => {

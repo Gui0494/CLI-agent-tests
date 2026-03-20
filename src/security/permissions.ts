@@ -142,7 +142,7 @@ export const TOOL_PERMISSION_MAP: Record<string, PermissionClass> = {
 
 /**
  * Get the permission class for a tool.
- * Returns SHELL_SAFE as default for unknown tools.
+ * Returns SHELL_UNSAFE as a conservative default for unknown tools.
  */
 export function getToolPermissionClass(toolName: string): PermissionClass {
   return TOOL_PERMISSION_MAP[toolName] ?? PermissionClass.SHELL_UNSAFE;
