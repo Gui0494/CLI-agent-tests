@@ -13,3 +13,5 @@ logs/
 caches/
 test*.txt
 *.log
+.aurex/
+python/.aurex/
