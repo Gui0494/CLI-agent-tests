@@ -20,9 +20,9 @@ program
   .name("aurex")
   .description("AurexAI - Local CLI Agent for code editing, web search, planning, and execution")
   .version("0.1.0")
-  .option("--no-color", "Disable color output")
+  .option("--plain", "Disable color output (respects NO_COLOR env var)")
   .option("--non-interactive", "Run in non-interactive mode (disable prompts)")
-  .option("--continue", "Resume the most recent session")
+  .option("--continue-session", "Resume the most recent session")
   .option("--resume <session-id>", "Resume a specific session by ID");
 
 program
