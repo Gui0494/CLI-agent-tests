@@ -12,6 +12,7 @@ import {
     handleGrep,
     handleCreateAgent
 } from "./tool-handlers.js";
+import { createVerifier } from "../verifier/test-runner.js";
 
 export function setupBridgeHandlers(
   bridgeArg: PythonBridge,
@@ -67,6 +68,21 @@ export function setupBridgeHandlers(
             const allowed = ["y", "yes", "s", "sim"].includes(answer.trim().toLowerCase());
             bridge.sendResponse(req.id, { allowed });
             bridge.emit("resume_spinner");
+        } else if (req.method === "run_verification") {
+            // Self-healing pipeline: run verification stages via test-runner
+            try {
+                const { stages } = req.params as { stages?: string[] };
+                const verifier = createVerifier({ skipE2e: true });
+                let results;
+                if (stages && stages.length > 0) {
+                    results = await Promise.all(stages.map((s: string) => verifier.runStage(s)));
+                } else {
+                    results = await verifier.runPipeline();
+                }
+                bridge.sendResponse(req.id, { stages: results });
+            } catch (err: unknown) {
+                bridge.sendResponse(req.id, null, { code: -32000, message: (err as Error).message });
+            }
         } else if (req.method === "run_node_tool") {
             const { tool_name, tool_args: raw_args } = req.params as { tool_name: string; tool_args: Record<string, unknown> };
             const tool_args = raw_args as any; // Args are validated by Python before dispatch

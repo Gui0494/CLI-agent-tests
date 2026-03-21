@@ -114,6 +114,21 @@ export const RpcMethodSchemas = {
   academic_search: z.object({
     query: z.string().min(1).max(10_000),
   }),
+
+  // Bidirectional: verification pipeline
+  run_verification: z.object({
+    stages: z.array(z.string().max(32)).optional(),
+  }),
+
+  // Node → Python: backup management
+  create_backup: z.object({
+    files: z.array(z.string().max(4096)).min(1),
+    label: z.string().max(64).optional(),
+  }),
+
+  restore_backup: z.object({
+    backup_path: z.string().min(1).max(4096),
+  }),
 } as const;
 
 export type RpcMethodName = keyof typeof RpcMethodSchemas;

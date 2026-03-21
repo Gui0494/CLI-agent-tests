@@ -10,6 +10,7 @@ from aurex.config.loader import AurexConfig
 from aurex.core.context_manager import ContextManager
 from aurex.core.tool_registry import ToolRegistry
 from aurex.core.skill_loader import SkillLoader
+from aurex.core.verification import VerificationPipeline
 
 try:
     from aurex.skills.function_calling.run import run as function_calling_run
@@ -19,13 +20,21 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 class AgentLoop:
-    def __init__(self, config: AurexConfig, context_manager: ContextManager, 
-                 tool_registry: ToolRegistry, skill_loader: SkillLoader):
+    def __init__(self, config: AurexConfig, context_manager: ContextManager,
+                 tool_registry: ToolRegistry, skill_loader: SkillLoader,
+                 call_client=None):
         self.config = config
         self.context = context_manager
         self.registry = tool_registry
         self.loader = skill_loader
-        
+        self.call_client = call_client
+
+        # Self-healing verification pipeline
+        self.verifier = VerificationPipeline(
+            call_client=call_client,
+            max_retries=3,
+        ) if call_client else None
+
         # Load skills on initialization
         self.loader.load_all_skills()
 
@@ -129,39 +138,58 @@ class AgentLoop:
         tool_calls = fc_result.get("tool_calls", [])
         final_response = fc_result.get("response", str(fc_result))
 
-        # 5.5. Autoreviewer Guardrail: Second Pass Execution
-        # If the Coder modified files, explicitly invoke a Senior Review pass to catch duplicated logic and bugs.
-        modified_files = any(tc.get("name") in ["write_file", "edit_file", "patch_file"] for tc in tool_calls)
+        # 5.5. Self-Healing Verification Pipeline
+        # If files were modified, run real verification (typecheck + lint + test)
+        # instead of the old LLM-based auto-reviewer which could corrupt code.
         import os
         import sys
-        if modified_files and os.environ.get("AUREX_AUTO_REVIEW", "1") == "1":
-            print("\n[agent] 🔍 Code modifications detected. Running automated Reviewer pass...", file=sys.stderr)
-            reviewer_prompt = (
-                "You are an elite Senior Code Reviewer evaluating the previous modifications. "
-                "Critically analyze the code changes. Look for: "
-                "1. Architectural flaws or omitted requirements. "
-                "2. Potential bugs, edge cases, and performance/UX issues. "
-                "3. Duplicated logic or placeholder comments (e.g. '// rest of code').\n"
-                "If you find issues, explicitly use the `edit_file` tool to patch them immediately. "
-                "If no changes are necessary and the code is perfect, just say 'LGTM' (Looks Good To Me)."
-            )
-            
-            messages.append({"role": "assistant", "content": final_response})
-            messages.append({"role": "user", "content": reviewer_prompt})
-            
-            review_params = fc_params.copy()
-            review_params["messages"] = messages
-            review_params["system_prompt"] = reviewer_prompt
-            review_params["max_rounds"] = 5  # Give it a few rounds to apply patches
-            
-            try:
-                review_result = await function_calling_run(review_params)
-                review_response = review_result.get("response", "")
-                final_response += "\n\n### 🔍 Automated Code Review\n" + review_response
-                tool_calls.extend(review_result.get("tool_calls", []))
-            except Exception as e:
-                logger.error(f"Reviewer pass failed: {e}")
-                final_response += f"\n\n### 🔍 Automated Code Review\nFailed to complete review: {e}"
+        modified_file_paths = self.verifier.extract_modified_files(tool_calls) if self.verifier else []
+        if modified_file_paths and self.verifier and os.environ.get("AUREX_VERIFY", "1") == "1":
+            print(f"\n[agent] Verifying {len(modified_file_paths)} modified file(s)...", file=sys.stderr)
+
+            # Snapshot for rollback
+            snapshot = self.verifier.create_snapshot(modified_file_paths)
+
+            for attempt in range(1, self.verifier.max_retries + 1):
+                verification = await self.verifier.verify()
+
+                if verification.passed:
+                    print(f"[agent] Verification passed.", file=sys.stderr)
+                    final_response += "\n\n### Verification\nAll checks passed (typecheck, lint, test)."
+                    break
+
+                print(f"[agent] Verification failed (attempt {attempt}/{self.verifier.max_retries}).", file=sys.stderr)
+
+                if attempt == self.verifier.max_retries:
+                    # Max retries exhausted — rollback
+                    print("[agent] Max fix attempts reached. Rolling back changes.", file=sys.stderr)
+                    restored = self.verifier.restore_snapshot(snapshot)
+                    final_response += (
+                        f"\n\n### Verification Failed\n"
+                        f"Could not fix errors after {self.verifier.max_retries} attempts. "
+                        f"Changes rolled back for {len(restored)} file(s).\n\n"
+                        f"Errors:\n{verification.error_summary}"
+                    )
+                    break
+
+                # Inject real errors into context and re-run the agent loop
+                error_prompt = self.verifier.build_error_injection_prompt(verification, attempt)
+                messages.append({"role": "assistant", "content": final_response})
+                messages.append({"role": "user", "content": error_prompt})
+
+                fix_params = fc_params.copy()
+                fix_params["messages"] = messages
+                fix_params["max_rounds"] = 5
+
+                try:
+                    fix_result = await function_calling_run(fix_params)
+                    fix_response = fix_result.get("response", "")
+                    final_response += f"\n\n### Fix Attempt {attempt}\n{fix_response}"
+                    tool_calls.extend(fix_result.get("tool_calls", []))
+                except Exception as e:
+                    logger.error(f"Fix attempt {attempt} failed: {e}")
+                    final_response += f"\n\n### Fix Attempt {attempt}\nFailed: {e}"
+                    break
 
         # 6. Update context with final overarching result
         await self.context.add_to_long_term({"role": "assistant", "content": final_response})

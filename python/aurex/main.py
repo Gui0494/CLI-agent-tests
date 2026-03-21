@@ -24,6 +24,7 @@ from aurex.ratelimit.limiter import RateLimiter
 import os
 from aurex.core.tool_registry import ToolRegistry
 from aurex.core.context_manager import ContextManager
+from aurex.core.adaptive_context import AdaptiveContextManager
 from aurex.core.skill_loader import SkillLoader
 from aurex.core.agent_loop import AgentLoop
 
@@ -85,6 +86,16 @@ class ManageHistoryParams(BaseModel):
 class AcademicSearchParams(BaseModel):
     query: str = Field(min_length=1, max_length=10_000)
 
+class RunVerificationParams(BaseModel):
+    stages: List[str] = Field(default=["test", "lint", "typecheck"])
+
+class CreateBackupParams(BaseModel):
+    files: List[str] = Field(min_length=1)
+    label: str = Field(default="manual", max_length=64)
+
+class RestoreBackupParams(BaseModel):
+    backup_path: str = Field(min_length=1, max_length=4096)
+
 
 # Map method names to their Pydantic schema
 RPC_PARAM_SCHEMAS: Dict[str, type] = {
@@ -97,6 +108,9 @@ RPC_PARAM_SCHEMAS: Dict[str, type] = {
     "execute_tool": ExecuteToolParams,
     "manage_history": ManageHistoryParams,
     "academic_search": AcademicSearchParams,
+    "run_verification": RunVerificationParams,
+    "create_backup": CreateBackupParams,
+    "restore_backup": RestoreBackupParams,
 }
 
 
@@ -285,7 +299,7 @@ class JsonRpcServer:
         # REMOVED: create_agent tool — dynamic code generation + hot-loading is a critical
         # security vulnerability. Skills are now installed via declarative manifests only.
         
-        self.context_manager = ContextManager(llm_client=self.llm)
+        self.context_manager = AdaptiveContextManager(llm_client=self.llm)
         skills_dir = os.path.join(os.path.dirname(__file__), "skills")
         self.skill_loader = SkillLoader(skills_dir=skills_dir, tool_registry=self.tool_registry)
         
@@ -294,7 +308,8 @@ class JsonRpcServer:
             config=self.config,
             context_manager=self.context_manager,
             tool_registry=self.tool_registry,
-            skill_loader=self.skill_loader
+            skill_loader=self.skill_loader,
+            call_client=self.call_client,
         )
 
         self.handlers = {
@@ -307,6 +322,9 @@ class JsonRpcServer:
             "agent_run": self._handle_agent_run,
             "execute_tool": self._handle_execute_tool,
             "manage_history": self._handle_manage_history,
+            "run_verification": self._handle_run_verification,
+            "create_backup": self._handle_create_backup,
+            "restore_backup": self._handle_restore_backup,
         }
 
         self.pending_requests = {}
@@ -319,6 +337,43 @@ class JsonRpcServer:
             return {"error": "Tool name is required"}
         result = await self.tool_registry.execute(name, args)
         return result
+
+    async def _handle_run_verification(self, params: dict) -> dict:
+        """Proxy verification request to Node-side verifier."""
+        stages = params.get("stages", ["test", "lint", "typecheck"])
+        result = await self.call_client("run_verification", {"stages": stages})
+        return result
+
+    async def _handle_create_backup(self, params: dict) -> dict:
+        """Create a file backup snapshot."""
+        from aurex.core.verification import VerificationPipeline
+        verifier = VerificationPipeline(call_client=self.call_client)
+        files = params.get("files", [])
+        label = params.get("label", "manual")
+        snapshot = verifier.create_snapshot(files)
+        backup_path = verifier.save_backup_to_disk(snapshot, label)
+        return {"backup_path": backup_path, "file_count": snapshot.file_count}
+
+    async def _handle_restore_backup(self, params: dict) -> dict:
+        """Restore files from a backup."""
+        import json as json_mod
+        backup_path = params.get("backup_path", "")
+        manifest_path = os.path.join(backup_path, "manifest.json")
+        if not os.path.exists(manifest_path):
+            return {"error": f"Backup not found: {backup_path}"}
+        with open(manifest_path) as f:
+            manifest = json_mod.load(f)
+        restored = []
+        for abs_path, safe_name in manifest.items():
+            file_backup = os.path.join(backup_path, safe_name)
+            if os.path.exists(file_backup):
+                with open(file_backup, "rb") as bf:
+                    content = bf.read()
+                os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+                with open(abs_path, "wb") as wf:
+                    wf.write(content)
+                restored.append(abs_path)
+        return {"restored": restored, "count": len(restored)}
 
     async def _handle_search(self, params: dict) -> dict:
         query = params.get("query", "")
