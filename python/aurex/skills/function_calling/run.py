@@ -23,6 +23,7 @@ Formato OpenAI (function_calling):
   ]
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -411,11 +412,11 @@ async def run(params: dict[str, Any], tool_registry: Any = None) -> dict[str, An
                 } for t in response["tool_calls"]],
             })
 
-        # 4. Execute each tool call and append results
-        for tc in response["tool_calls"]:
-            all_tool_calls.append(tc)
+        # 4. Execute tool calls (parallel when safe, sequential otherwise)
+        READ_ONLY_TOOLS = {"read_file", "list_files", "grep", "find_symbol", "get_outline"}
 
-            # Executa via executor customizado ou tool_registry
+        async def execute_single_tool(tc):
+            """Execute a single tool call and return (tc, result)."""
             result = {"error": "Nenhum executor disponível"}
             if tool_executor:
                 try:
@@ -430,8 +431,24 @@ async def run(params: dict[str, Any], tool_registry: Any = None) -> dict[str, An
                         result = {"error": "tool_registry sem método execute"}
                 except Exception as e:
                     result = {"error": str(e)}
+            return (tc, result)
 
-            # Append tool result
+        tool_calls_list = response["tool_calls"]
+        all_read_only = all(tc["name"] in READ_ONLY_TOOLS for tc in tool_calls_list)
+
+        if all_read_only and len(tool_calls_list) > 1:
+            # All read-only: execute in parallel
+            results = await asyncio.gather(
+                *(execute_single_tool(tc) for tc in tool_calls_list)
+            )
+        else:
+            # Sequential execution (safe default)
+            results = []
+            for tc in tool_calls_list:
+                results.append(await execute_single_tool(tc))
+
+        for tc, result in results:
+            all_tool_calls.append(tc)
             if provider == "anthropic":
                 messages.append(build_tool_result_message_anthropic(tc["id"], result))
             else:

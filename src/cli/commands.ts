@@ -17,6 +17,12 @@ export const COMMANDS: CommandDef[] = [
   { name: "agent", aliases: ["a"], description: "Run autonomous agent loop", usage: "/agent <task> [-s max_steps]" },
   { name: "read", aliases: ["r"], description: "Read a file", usage: "/read <file>" },
   { name: "fetch", aliases: ["f"], description: "Fetch and extract URL content", usage: "/fetch <url>" },
+  { name: "init", aliases: [], description: "Detect project and generate .aurex/project.yaml", usage: "/init" },
+  { name: "compact", aliases: [], description: "Compact conversation context", usage: "/compact" },
+  { name: "cost", aliases: [], description: "Show token usage and cost estimate", usage: "/cost" },
+  { name: "diff", aliases: [], description: "Show git diff", usage: "/diff" },
+  { name: "undo", aliases: [], description: "Undo last conversation turn", usage: "/undo" },
+  { name: "commit", aliases: [], description: "Smart commit with AI message", usage: "/commit" },
 ];
 
 export function getHelp(): string {

@@ -5,6 +5,8 @@ import { ToolResult } from "../agent/base-tool.js";
 
 import { AppContext } from "../context.js";
 import { getHookEngine, HookEvent, HookAction } from "../hooks/engine.js";
+import { fuzzyFind } from "../editor/fuzzy-edit.js";
+import { FileCache } from "../memory/file-cache.js";
 
 type AskFunction = (q: string) => Promise<string>;
 
@@ -42,8 +44,19 @@ export async function handleExec(tool_args: ExecArgs, executor: { run: (cmd: str
     }
 }
 
-export async function handleReadFile(tool_args: ReadFileArgs): Promise<ToolResult> {
+export async function handleReadFile(tool_args: ReadFileArgs, fileCache?: FileCache): Promise<ToolResult> {
+    // Check cache first
+    if (fileCache) {
+        const cached = await fileCache.get(tool_args.path);
+        if (cached) {
+            return { ok: true, content: cached.content.slice(0, 50000), truncated: cached.content.length > 50000, fromCache: true };
+        }
+    }
     const content = await readFile(tool_args.path);
+    // Store in cache
+    if (fileCache) {
+        await fileCache.set(tool_args.path, content);
+    }
     return { ok: true, content: content.slice(0, 50000), truncated: content.length > 50000 };
 }
 
@@ -60,7 +73,17 @@ export async function handleEditFile(tool_args: EditFileArgs, ask: AskFunction, 
     const content = await readFile(filePath);
     
     if (!content.includes(oldText)) {
-        return { ok: false, error: "old_text not found in file. Ensure it is an exact match including whitespace." };
+        // Fuzzy matching fallback
+        const fuzzyResult = fuzzyFind(content, oldText);
+        if (fuzzyResult) {
+            console.log(chalk.yellow(`  Exact match not found. Using fuzzy match (distance: ${fuzzyResult.distance})`));
+            return handleEditFile(
+                { ...tool_args, old_text: fuzzyResult.match },
+                ask,
+                appContext,
+            );
+        }
+        return { ok: false, error: "old_text not found in file (even with fuzzy matching). Ensure it is an exact match including whitespace." };
     }
     
     const occurrences = content.split(oldText).length - 1;

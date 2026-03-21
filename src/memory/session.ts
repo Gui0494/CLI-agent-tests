@@ -12,6 +12,7 @@ import { ApprovalMemory } from "../agent/approval-memory.js";
 import { FileCache } from "./file-cache.js";
 import { PlanStateManager } from "./plan-state.js";
 import { ConversationStore } from "./conversation.js";
+import { TokenTracker } from "./token-tracker.js";
 
 // ─── Interfaces ──────────────────────────────────────────
 
@@ -20,6 +21,7 @@ export interface ProjectContext {
   packageManager: string;      // npm, yarn, pnpm
   structure: string[];         // top-level dirs
   conventions: Record<string, unknown>; // from .agent/conventions.json
+  rules?: string;                      // from .aurex/rules.md
 }
 
 export interface DoctorCheck {
@@ -67,6 +69,7 @@ export class SessionMemory {
   readonly fileCache: FileCache;
   readonly planState: PlanStateManager;
   readonly approvalMemory: ApprovalMemory;
+  readonly tokenTracker: TokenTracker;
 
   // Session state
   projectContext: ProjectContext | null = null;
@@ -90,6 +93,7 @@ export class SessionMemory {
     });
     this.planState = new PlanStateManager();
     this.approvalMemory = new ApprovalMemory();
+    this.tokenTracker = new TokenTracker(options?.maxTokens ?? MEMORY_LIMITS.maxContextTokens);
   }
 
   /**
@@ -122,7 +126,7 @@ export class SessionMemory {
       startedAt: this.startedAt,
       messageCount: this.conversation.getMessageCount(),
       toolCallCount: this.toolCallCount,
-      totalTokens: this.conversation.getTotalTokens(),
+      totalTokens: this.tokenTracker.getSummary().consumed.total || this.conversation.getTotalTokens(),
       fileCacheSize: this.fileCache.size(),
       activePlan: activePlan?.objective || null,
       approvalCount: this.approvalMemory.getActiveApprovals().length,
@@ -180,7 +184,16 @@ export class SessionMemory {
         // No conventions file
       }
 
-      this.projectContext = { stack, packageManager, structure, conventions };
+      // Load .aurex/rules.md if present
+      let rules = "";
+      try {
+        const rulesContent = await fs.readFile(".aurex/rules.md", "utf-8");
+        rules = rulesContent.slice(0, 10_000); // cap at 10KB
+      } catch {
+        // No rules.md
+      }
+
+      this.projectContext = { stack, packageManager, structure, conventions, rules };
     } catch {
       // Can't load project context
     }

@@ -22,6 +22,7 @@ export interface ToolResult<T = unknown> {
     count?: number;
     details?: unknown;
     data?: T;
+    fromCache?: boolean;
 }
 
 export abstract class BaseTool<T> {

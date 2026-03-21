@@ -75,7 +75,18 @@ class AgentLoop:
         if "deepseek" in model.lower():
             provider = "deepseek"
         
-        # Enforce strict SOP for the agent 
+        # Load .aurex/rules.md if present (Phase 6.4)
+        import os
+        rules_content = ""
+        rules_path = os.path.join(os.getcwd(), ".aurex", "rules.md")
+        if os.path.exists(rules_path):
+            try:
+                with open(rules_path, "r", encoding="utf-8") as f:
+                    rules_content = f.read(10_000)
+            except Exception:
+                pass
+
+        # Enforce strict SOP for the agent
         sop_prompt = (
             "You are an elite, autonomous Senior CLI Agent.\n"
             "THE GOLDEN RULE OF HONESTY: NEVER say you created, saved, moved, installed, or edited a file unless you have specifically called a tool to do so AND that tool returned a success message. DO NOT simulate execution.\n"
@@ -101,7 +112,11 @@ class AgentLoop:
             "provider": provider,
             "model": model,
             "max_rounds": max_steps,
-            "system_prompt": (sop_prompt + "\n".join(system_context_parts)) if system_context_parts else sop_prompt
+            "system_prompt": (
+                (f"## Project Rules\n{rules_content}\n\n" if rules_content else "")
+                + sop_prompt
+                + ("\n".join(system_context_parts) if system_context_parts else "")
+            )
         }
 
         # Tool executor — skills are declarative-only (no executable modules),
