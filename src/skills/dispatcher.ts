@@ -1,15 +1,10 @@
 /**
  * dispatcher.ts — Skill dispatcher for AurexAI CLI Agent
  *
- * @deprecated Not yet connected to execution pipeline. TODO: Wire SkillDispatcher
- * into AgentLoop step execution.
- *
  * Selects and executes skills, managing the lifecycle:
  * validate prerequisites → execute steps → handle errors → return result.
  *
- * @deprecated Not yet connected to AgentLoop.
- * TODO: Wire SkillDispatcher into AgentLoop step execution pipeline.
- * The dispatcher is fully implemented and tested but no production code path uses it.
+ * Wired into AgentLoop via AppContext.skillDispatcher.
  *
  * Reference: docs/architecture-reference/specs/skill-user.md §4
  */

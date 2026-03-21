@@ -77,6 +77,13 @@ export const ConfigSchema = z.object({
         pr_template: z.boolean().default(CONFIG_DEFAULTS.repo_agent.pr_template),
         review_on_push: z.boolean().default(CONFIG_DEFAULTS.repo_agent.review_on_push),
     }).default({}),
+    mcp: z.object({
+        servers: z.record(z.string(), z.object({
+            command: z.string(),
+            args: z.array(z.string()).default([]),
+            env: z.record(z.string(), z.string()).default({}),
+        })).default({}),
+    }).default({}),
 });
 
 export type AurexConfig = z.infer<typeof ConfigSchema>;

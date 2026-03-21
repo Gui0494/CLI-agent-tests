@@ -1,4 +1,5 @@
 import chalk from "chalk";
+import { NEW_SLASH_COMMANDS } from "./slash-commands/index.js";
 
 export interface CommandDef {
   name: string;
@@ -26,6 +27,12 @@ export function getHelp(): string {
       (c) =>
         `  ${chalk.green(c.usage.padEnd(35))} ${c.description}` +
         (c.aliases.length ? chalk.gray(` (/${c.aliases.join(", /")})`) : "")
+    ),
+    "",
+    chalk.bold.cyan("  Session Commands\n"),
+    ...NEW_SLASH_COMMANDS.map(
+      (c) =>
+        `  ${chalk.green((`/${c.name}`).padEnd(35))} ${c.description}`
     ),
     "",
     chalk.gray("  Or just type naturally to chat with the AI.\n"),

@@ -12,6 +12,7 @@ import { ApprovalMemory } from "../agent/approval-memory.js";
 import { FileCache } from "./file-cache.js";
 import { PlanStateManager } from "./plan-state.js";
 import { ConversationStore } from "./conversation.js";
+import { loadAgentFiles, buildAgentPrompt, AgentFileEntry } from "./agent-files.js";
 
 // ─── Interfaces ──────────────────────────────────────────
 
@@ -72,6 +73,7 @@ export class SessionMemory {
   projectContext: ProjectContext | null = null;
   doctorResult: DoctorResult | null = null;
   toolCallCount: number = 0;
+  agentFiles: AgentFileEntry[] = [];
 
   constructor(
     private modeManager: ModeManager,
@@ -181,9 +183,27 @@ export class SessionMemory {
       }
 
       this.projectContext = { stack, packageManager, structure, conventions };
+
+      // Load AGENT.md hierarchy (global → project → dir → local → rules)
+      this.agentFiles = loadAgentFiles(process.cwd(), process.cwd());
     } catch {
       // Can't load project context
     }
+  }
+
+  /**
+   * Build system prompt section from loaded AGENT.md files.
+   * Rules with glob scopes are filtered by activeFiles.
+   */
+  getAgentPrompt(activeFiles?: string[]): string {
+    return buildAgentPrompt(this.agentFiles, activeFiles);
+  }
+
+  /**
+   * Reload AGENT.md files from disk (e.g. after compaction).
+   */
+  reloadAgentFiles(): void {
+    this.agentFiles = loadAgentFiles(process.cwd(), process.cwd());
   }
 
   /**

@@ -1,16 +1,11 @@
 /**
  * runner.ts — Subagent runner for AurexAI CLI Agent
  *
- * @deprecated Not yet connected to AgentLoop. TODO: Wire SubagentRunner into
- * AppContext when subagent orchestration is implemented.
- *
  * Executes subagents in isolated context. Each subagent gets its own
  * system prompt, restricted tool set, and token budget. Results are
  * returned as typed structures to the main agent loop.
  *
- * @deprecated Not yet connected to AgentLoop or AppContext.
- * TODO: Wire SubagentRunner into AgentLoop when subagent orchestration is implemented.
- * The runner is fully implemented and tested but no production code path instantiates it.
+ * Wired into AgentLoop via AppContext.subagentRunner.
  *
  * Reference: docs/architecture-reference/specs/architecture.md §2.6
  */

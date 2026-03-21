@@ -1,4 +1,21 @@
 import chalk from "chalk";
+import { marked, type MarkedExtension } from "marked";
+// @ts-expect-error -- marked-terminal has no type declarations
+import { markedTerminal } from "marked-terminal";
+import { noColor } from "./detect-mode.js";
+
+// Configure marked with terminal renderer
+marked.use(
+  markedTerminal({
+    code: noColor ? undefined : chalk.yellow,
+    heading: noColor ? undefined : chalk.green.bold,
+    strong: noColor ? undefined : chalk.bold,
+    codespan: noColor ? undefined : chalk.yellow,
+    link: noColor ? undefined : chalk.blue,
+    width: 80,
+    emoji: false,
+  }) as MarkedExtension
+);
 
 export interface Citation {
   url: string;
@@ -9,24 +26,9 @@ export interface Citation {
 }
 
 export function renderMarkdown(text: string): void {
-  // Simple terminal markdown rendering
-  const lines = text.split("\n");
-  for (const line of lines) {
-    if (line.startsWith("# ")) {
-      console.log(chalk.bold.cyan(line.slice(2)));
-    } else if (line.startsWith("## ")) {
-      console.log(chalk.bold.yellow(line.slice(3)));
-    } else if (line.startsWith("### ")) {
-      console.log(chalk.bold(line.slice(4)));
-    } else if (line.startsWith("- ") || line.startsWith("* ")) {
-      console.log(chalk.white(`  ${line}`));
-    } else if (line.startsWith("```")) {
-      console.log(chalk.gray(line));
-    } else if (line.match(/^\d+\.\s/)) {
-      console.log(chalk.white(`  ${line}`));
-    } else {
-      console.log(line);
-    }
+  const rendered = marked.parse(text);
+  if (typeof rendered === "string") {
+    process.stdout.write(rendered);
   }
 }
 

@@ -2,7 +2,6 @@ import { PythonBridge } from "../bridge/python-bridge.js";
 
 import chalk from "chalk";
 import ora from "ora";
-import { z } from "zod";
 import { AppContext } from "../context.js";
 import { getHookEngine, HookEvent, HookAction } from "../hooks/engine.js";
 
@@ -40,9 +39,14 @@ export class AgentLoop {
 
         try {
             const start = Date.now();
+
+            // Inject AGENT.md rules and agent files into system context
+            const agentPrompt = this.appContext.session.getAgentPrompt();
+
             const result = await this.bridge.call<AgentRunResult>("agent_run", {
                 user_input: context.task,
-                max_steps: context.maxSteps
+                max_steps: context.maxSteps,
+                ...(agentPrompt ? { system_context: agentPrompt } : {}),
             }, 300000); // 5 min timeout for deep agent runs
 
             const elapsed = Date.now() - start;
