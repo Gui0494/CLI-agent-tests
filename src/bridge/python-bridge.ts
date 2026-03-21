@@ -1,6 +1,6 @@
 import { spawn, ChildProcess } from "child_process";
 import { EventEmitter } from "events";
-import { createRequest, parseResponse, JsonRpcResponse } from "./protocol.js";
+import { createRequest, parseResponse, validateMethodParams, JsonRpcResponse } from "./protocol.js";
 import * as path from "path";
 import * as os from "os";
 import { fileURLToPath } from "url";
@@ -216,7 +216,26 @@ export class PythonBridge extends TypedEventEmitter {
 
         // Detect incoming requests from Python (has method field)
         if (parsed.method && typeof parsed.method === "string") {
-          this.emit("request", parsed as BridgeRequest);
+          // Validate incoming request params against schema
+          try {
+            const validatedParams = validateMethodParams(parsed.method, parsed.params ?? {});
+            const validated: BridgeRequest = {
+              jsonrpc: parsed.jsonrpc ?? "2.0",
+              id: parsed.id,
+              method: parsed.method,
+              params: validatedParams,
+            };
+            this.emit("request", validated);
+          } catch (validationError: any) {
+            console.error(`[python-bridge] Request validation failed for method "${parsed.method}": ${validationError.message}`);
+            // Send error response back to Python
+            if (parsed.id != null) {
+              this.sendResponse(parsed.id, undefined, {
+                code: -32602,
+                message: `Invalid params: ${validationError.message}`,
+              });
+            }
+          }
           continue;
         }
 

@@ -71,7 +71,6 @@ class AgentLoop:
             "You are an elite, autonomous Senior CLI Agent.\n"
             "THE GOLDEN RULE OF HONESTY: NEVER say you created, saved, moved, installed, or edited a file unless you have specifically called a tool to do so AND that tool returned a success message. DO NOT simulate execution.\n"
             "You MUST strictly follow this execution pipeline for every request:\n"
-            "0. DYNAMIC AGENT CREATION: If the user commands an action that requires a highly specialized skill (e.g. specialized design, analyzing specific architectures, specific frameworks) that no existing tool/skill can fulfill, you MUST invoke the `create_agent` tool to automatically generate a specialized meta-agent.\n"
             "1. READ: Use `list_files` and `read_file` to understand the user's current project structure. If the project doesn't exist, prepare to build it from scratch.\n"
             "2. THINK & PLAN: Analyze the requirements and mentally plan the architecture.\n"
             "3. CODE: Use `write_file` (for new files) or `edit_file` (for existing files) to implement the plan.\n"
@@ -96,17 +95,23 @@ class AgentLoop:
             "system_prompt": (sop_prompt + "\n".join(system_context_parts)) if system_context_parts else sop_prompt
         }
 
-        # Custom tool executor wrapper to handle both registry tools and skills
+        # Tool executor — skills are declarative-only (no executable modules),
+        # so all execution goes through the registry.
         async def combined_executor(tool_name: str, args: dict) -> Any:
             if tool_name in self.loader.loaded_skills:
-                # It's a skill
-                run_func = self.loader.loaded_skills[tool_name]["module"].run
-                try:
-                    return await run_func(args, self.registry)
-                except Exception as e:
-                    return {"error": f"Skill execution failed: {str(e)}"}
+                skill = self.loader.loaded_skills[tool_name]
+                if skill.get("module") is not None and hasattr(skill["module"], "run"):
+                    # Legacy skill with executable module (pre-installed, trusted)
+                    run_func = skill["module"].run
+                    try:
+                        return await run_func(args, self.registry)
+                    except Exception as e:
+                        return {"error": f"Skill execution failed: {str(e)}"}
+                else:
+                    # Declarative skill — no executable code
+                    return {"error": f"Skill '{tool_name}' is declarative-only and cannot be directly executed as a tool."}
             else:
-                # It's a core tool
+                # Core tool from registry
                 try:
                     return await self.registry.execute(tool_name, args)
                 except Exception as e:

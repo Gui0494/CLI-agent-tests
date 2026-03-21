@@ -1,12 +1,19 @@
 """
 JSON-RPC server that communicates with the Node.js CLI via stdio.
 Handles: search, fetch_url, llm_chat, llm_plan, academic_search
+
+SECURITY: All incoming JSON-RPC payloads are validated against Pydantic schemas
+before dispatching to handlers. Unknown methods and malformed params are rejected.
 """
 
 import json
 import sys
 import asyncio
 import traceback
+import re
+
+from pydantic import BaseModel, Field, field_validator
+from typing import Optional, List, Dict, Any, Literal
 
 from aurex.config.loader import get_config
 from aurex.llm.router import OpenRouterClient
@@ -19,6 +26,78 @@ from aurex.core.tool_registry import ToolRegistry
 from aurex.core.context_manager import ContextManager
 from aurex.core.skill_loader import SkillLoader
 from aurex.core.agent_loop import AgentLoop
+
+
+# ─── RPC Method Parameter Schemas (Pydantic) ─────────────
+# Every incoming RPC call is validated against these before handler dispatch.
+
+class SearchParams(BaseModel):
+    query: str = Field(min_length=1, max_length=10_000)
+    max_results: int = Field(default=5, ge=1, le=100)
+
+class FetchUrlParams(BaseModel):
+    url: str = Field(min_length=1, max_length=8192)
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, v: str) -> str:
+        if not re.match(r'^https?://', v):
+            raise ValueError("URL must start with http:// or https://")
+        return v
+
+class LlmChatMessage(BaseModel):
+    role: Literal["system", "user", "assistant"]
+    content: str
+
+class LlmChatParams(BaseModel):
+    messages: List[LlmChatMessage] = Field(min_length=1)
+    model: Optional[str] = Field(default=None, max_length=256)
+
+class LlmStreamParams(BaseModel):
+    prompt: str = Field(min_length=1, max_length=100_000)
+    system_prompt: Optional[str] = Field(default=None, max_length=100_000)
+    model: Optional[str] = Field(default=None, max_length=256)
+    temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
+    provider: Optional[str] = Field(default=None, max_length=64)
+    api_key: Optional[str] = Field(default=None, max_length=1024)
+
+class LlmPlanParams(BaseModel):
+    task: str = Field(min_length=1, max_length=100_000)
+
+class AgentRunParams(BaseModel):
+    user_input: str = Field(min_length=1, max_length=100_000)
+    max_steps: int = Field(default=10, ge=1, le=50)
+
+class ExecuteToolParams(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    params: Dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("name")
+    @classmethod
+    def validate_tool_name(cls, v: str) -> str:
+        if not re.match(r'^[a-z_][a-z0-9_]*$', v, re.IGNORECASE):
+            raise ValueError(f"Invalid tool name format: {v}")
+        return v
+
+class ManageHistoryParams(BaseModel):
+    action: Literal["load", "clear", "undo", "status"] = "status"
+
+class AcademicSearchParams(BaseModel):
+    query: str = Field(min_length=1, max_length=10_000)
+
+
+# Map method names to their Pydantic schema
+RPC_PARAM_SCHEMAS: Dict[str, type] = {
+    "search": SearchParams,
+    "fetch_url": FetchUrlParams,
+    "llm_chat": LlmChatParams,
+    "llm_stream": LlmStreamParams,
+    "llm_plan": LlmPlanParams,
+    "agent_run": AgentRunParams,
+    "execute_tool": ExecuteToolParams,
+    "manage_history": ManageHistoryParams,
+    "academic_search": AcademicSearchParams,
+}
 
 
 class JsonRpcServer:
@@ -98,26 +177,11 @@ class JsonRpcServer:
             }})
             return result
             
-        async def create_agent_tool(agent_name: str, purpose: str, triggers: list, tools: list):
-            import os
-            output_dir = os.path.join(os.path.dirname(__file__), "skills")
-            result = await self.call_client("run_node_tool", {
-                "tool_name": "create_agent",
-                "tool_args": {
-                    "agent_name": agent_name,
-                    "purpose": purpose,
-                    "triggers": triggers,
-                    "tools": tools,
-                    "output_dir": output_dir
-                }
-            })
-            if result and result.get("ok"):
-                # Dynamically hot-load the new skill/agent into the ecosystem
-                skill_path = os.path.join(output_dir, agent_name)
-                if os.path.exists(skill_path):
-                    self.skill_loader._load_skill(agent_name, skill_path)
-            return result
-            
+        # SECURITY: create_agent dynamic tool has been removed.
+        # Dynamic hot-loading of LLM-generated code is a critical attack surface.
+        # Skills must be installed via declarative YAML manifests (no executable code).
+        # See: SkillLoader.install_from_manifest() for the safe alternative.
+
         self.tool_registry.register("search_web", search_web_tool, schema={
             "name": "search_web",
             "description": "Searches the web for recent information.",
@@ -218,20 +282,8 @@ class JsonRpcServer:
             }
         }, timeout_seconds=15, risk_level="safe")
         
-        self.tool_registry.register("create_agent", create_agent_tool, schema={
-            "name": "create_agent",
-            "description": "Create a new specialized subagent/skill dynamically when no existing tool/skill can fulfill the user's highly specific request. Returns success and loads it into the system instantly.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "agent_name": {"type": "string", "description": "A short, hyphenated name (e.g., 'design-expert')"},
-                    "purpose": {"type": "string", "description": "The specific purpose and scope of the agent"},
-                    "triggers": {"type": "array", "items": {"type": "string"}, "description": "Keywords that trigger this agent"},
-                    "tools": {"type": "array", "items": {"type": "string"}, "description": "Existing tools the agent will use (e.g., ['read_file', 'exec_command'])"}
-                },
-                "required": ["agent_name", "purpose", "triggers", "tools"]
-            }
-        }, timeout_seconds=900, risk_level="medium")
+        # REMOVED: create_agent tool — dynamic code generation + hot-loading is a critical
+        # security vulnerability. Skills are now installed via declarative manifests only.
         
         self.context_manager = ContextManager(llm_client=self.llm)
         skills_dir = os.path.join(os.path.dirname(__file__), "skills")
@@ -376,6 +428,22 @@ class JsonRpcServer:
                 "error": {"code": -32601, "message": f"Method not found: {method}"},
                 "id": req_id,
             }
+
+        # Validate params against Pydantic schema (if defined)
+        schema_cls = RPC_PARAM_SCHEMAS.get(method)
+        if schema_cls:
+            try:
+                validated = schema_cls(**params)
+                params = validated.model_dump()
+            except Exception as e:
+                return {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32602,
+                        "message": f"Invalid params for '{method}': {str(e)}"
+                    },
+                    "id": req_id,
+                }
 
         try:
             result = await handler(params)
