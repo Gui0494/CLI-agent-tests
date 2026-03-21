@@ -27,6 +27,7 @@ from aurex.core.context_manager import ContextManager
 from aurex.core.adaptive_context import AdaptiveContextManager
 from aurex.core.skill_loader import SkillLoader
 from aurex.core.agent_loop import AgentLoop
+from aurex.tools.code_index_tools import register_code_index_tools
 
 
 # ─── RPC Method Parameter Schemas (Pydantic) ─────────────
@@ -298,7 +299,63 @@ class JsonRpcServer:
         
         # REMOVED: create_agent tool — dynamic code generation + hot-loading is a critical
         # security vulnerability. Skills are now installed via declarative manifests only.
-        
+
+        # Phase 2.2: Code index tools (find_symbol, get_outline)
+        register_code_index_tools(self.tool_registry, workspace_root=os.getcwd())
+
+        # Phase 6.2: Workspace search tools (find_dependencies, find_dependents)
+        from aurex.tools.workspace_search import WorkspaceSearch
+        ws_search = WorkspaceSearch(workspace_root=os.getcwd())
+
+        async def find_dependencies_tool(file_path: str):
+            return {"dependencies": ws_search.find_dependencies(file_path)}
+
+        async def find_dependents_tool(file_path: str):
+            return {"dependents": ws_search.find_dependents(file_path)}
+
+        self.tool_registry.register("find_dependencies", find_dependencies_tool, schema={
+            "name": "find_dependencies",
+            "description": "Find all files that the given file imports from.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to the source file"}
+                },
+                "required": ["file_path"]
+            }
+        }, timeout_seconds=30, risk_level="safe")
+
+        self.tool_registry.register("find_dependents", find_dependents_tool, schema={
+            "name": "find_dependents",
+            "description": "Find all files that import from the given file.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to the source file"}
+                },
+                "required": ["file_path"]
+            }
+        }, timeout_seconds=30, risk_level="safe")
+
+        # Phase 6.3: Test generation tool
+        from aurex.tools.test_generator import TestGenerator
+        test_gen = TestGenerator(workspace_root=os.getcwd())
+
+        async def generate_tests_tool(file_path: str):
+            return await test_gen.generate(file_path, llm_client=self.llm)
+
+        self.tool_registry.register("generate_tests", generate_tests_tool, schema={
+            "name": "generate_tests",
+            "description": "Generate unit tests for a source file using LLM.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to the source file to generate tests for"}
+                },
+                "required": ["file_path"]
+            }
+        }, timeout_seconds=60, risk_level="safe")
+
         self.context_manager = AdaptiveContextManager(llm_client=self.llm)
         skills_dir = os.path.join(os.path.dirname(__file__), "skills")
         self.skill_loader = SkillLoader(skills_dir=skills_dir, tool_registry=self.tool_registry)
@@ -395,16 +452,26 @@ class JsonRpcServer:
         response = await self.llm.chat(messages, model=model)
         return {"content": response}
 
-    async def _handle_llm_stream(self, params: dict) -> dict:
+    async def _handle_llm_stream(self, params: dict, request_id: int = 0) -> dict:
         prompt = params.get("prompt", "")
-        
+        # Also accept messages array for chat-style streaming
+        messages = params.get("messages", [])
+        if messages and not prompt:
+            # Extract last user message as prompt
+            for msg in reversed(messages):
+                if msg.get("role") == "user":
+                    prompt = msg.get("content", "")
+                    break
+
         try:
             from aurex.skills.streaming_engine.run import run as stream_run
         except ImportError:
             return {"error": "streaming_engine module not found"}
 
         def on_token(chunk):
-            self.send_notification("stream_token", chunk)
+            token = chunk.get("content", "") if isinstance(chunk, dict) else str(chunk)
+            if token:
+                self.send_notification("stream_chunk", {"request_id": request_id, "token": token})
 
         stream_params = {
             "prompt": prompt,

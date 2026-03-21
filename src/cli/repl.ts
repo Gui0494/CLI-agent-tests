@@ -10,6 +10,8 @@ import { readFile, writeFile } from "../editor/file-ops.js";
 import { renderMarkdown, renderCitations, Citation } from "./renderer.js";
 import { COMMANDS, getHelp } from "./commands.js";
 import { createAppContext } from "../context.js";
+import { detectProject } from "../init/project-detector.js";
+import { generateProjectYaml } from "../init/project-yaml.js";
 import { setupBridgeHandlers } from "./setup-bridge.js";
 import { getHookEngine, HookEvent } from "../hooks/engine.js";
 import { preShellHook } from "../hooks/rules/pre-shell.js";
@@ -48,7 +50,7 @@ export async function startRepl(): Promise<void> {
   }
 
   const completer = (line: string) => {
-    const completions = ["/help", "/search", "/exec", "/edit", "/test", "/plan", "/agent", "/read", "/fetch", "/exit"];
+    const completions = ["/help", "/search", "/exec", "/edit", "/test", "/plan", "/agent", "/read", "/fetch", "/init", "/compact", "/cost", "/diff", "/undo", "/commit", "/exit"];
     const hits = completions.filter((c) => c.startsWith(line));
     return [hits.length ? hits : completions, line];
   };
@@ -268,6 +270,99 @@ async function handleCommand(
       break;
     }
 
+    case "init": {
+      console.log(chalk.gray("Detecting project..."));
+      const project = await detectProject();
+      const yamlPath = await generateProjectYaml(project);
+      console.log(chalk.green(`Project detected: ${project.name}`));
+      console.log(chalk.gray(`  Stack: ${project.stack.join(", ") || "none detected"}`));
+      console.log(chalk.gray(`  Package manager: ${project.packageManager}`));
+      console.log(chalk.gray(`  Test: ${project.testCommand}`));
+      console.log(chalk.gray(`  Build: ${project.buildCommand || "none"}`));
+      console.log(chalk.green(`Saved to ${yamlPath}`));
+      break;
+    }
+
+    case "compact": {
+      if (!bridge.isStarted()) {
+        console.log(chalk.yellow("  Compact requires the Python bridge."));
+        break;
+      }
+      console.log(chalk.gray("Compacting context..."));
+      const compactResult = await bridge.call<{ removed?: number }>("manage_history", { action: "compact" });
+      console.log(chalk.green(`Context compacted. ${compactResult.removed ?? 0} messages summarized.`));
+      break;
+    }
+
+    case "cost": {
+      const summary = appContext.session.tokenTracker.getSummary();
+      console.log(chalk.bold.cyan("\nToken Usage"));
+      console.log(`  Prompt:     ${summary.consumed.prompt.toLocaleString()}`);
+      console.log(`  Completion: ${summary.consumed.completion.toLocaleString()}`);
+      console.log(`  Total:      ${summary.consumed.total.toLocaleString()} / ${summary.budget.toLocaleString()}`);
+      console.log(`  Remaining:  ${summary.remaining.toLocaleString()}`);
+      console.log(`  Est. cost:  $${summary.costEstimateUsd.toFixed(4)}`);
+      if (summary.overBudget) console.log(chalk.red("  WARNING: Over budget!"));
+      console.log();
+      break;
+    }
+
+    case "diff": {
+      console.log(chalk.gray("Getting git diff..."));
+      const diffResult = await executor.run("git diff");
+      const stagedResult = await executor.run("git diff --staged");
+      if (stagedResult.stdout) {
+        console.log(chalk.bold.cyan("Staged changes:"));
+        console.log(stagedResult.stdout);
+      }
+      if (diffResult.stdout) {
+        console.log(chalk.bold.cyan("Unstaged changes:"));
+        console.log(diffResult.stdout);
+      }
+      if (!diffResult.stdout && !stagedResult.stdout) {
+        console.log(chalk.gray("No changes."));
+      }
+      break;
+    }
+
+    case "undo": {
+      if (!bridge.isStarted()) {
+        console.log(chalk.yellow("  Undo requires the Python bridge."));
+        break;
+      }
+      const undoResult = await bridge.call<{ removed?: number }>("manage_history", { action: "undo" });
+      console.log(chalk.green(`Undone. ${undoResult.removed ?? 0} messages removed.`));
+      break;
+    }
+
+    case "commit": {
+      if (!bridge.isStarted()) {
+        console.log(chalk.yellow("  Smart commit requires the Python bridge (LLM)."));
+        break;
+      }
+      const commitDiff = await executor.run("git diff --staged");
+      if (!commitDiff.stdout) {
+        console.log(chalk.yellow("No staged changes. Use 'git add' first."));
+        break;
+      }
+      console.log(chalk.gray("Generating commit message..."));
+      const msgResult = await bridge.call<{ content: string }>("llm_chat", {
+        messages: [
+          { role: "system", content: "Generate a concise conventional commit message for this diff. Return ONLY the commit message, no explanation." },
+          { role: "user", content: commitDiff.stdout.slice(0, 10000) },
+        ],
+      });
+      const commitMsg = msgResult.content.trim().replace(/^["']|["']$/g, "");
+      console.log(chalk.cyan(`Commit message: ${commitMsg}`));
+      const commitResult = await executor.run(`git commit -m "${commitMsg.replace(/"/g, '\\"')}"`);
+      if (commitResult.exitCode === 0) {
+        console.log(chalk.green("Committed successfully."));
+      } else {
+        console.log(chalk.red(`Commit failed: ${commitResult.stderr}`));
+      }
+      break;
+    }
+
     case "exit":
     case "q":
       console.log(chalk.gray("\nGoodbye!"));
@@ -285,8 +380,33 @@ async function handleChat(input: string, bridge: PythonBridge): Promise<void> {
     console.log(chalk.gray("  You can still use local tools like /exec, /read, etc."));
     return;
   }
-  const response = await bridge.call<{ content: string }>("llm_chat", {
-    messages: [{ role: "user", content: input }],
-  });
-  renderMarkdown(response.content);
+
+  // Try streaming first, fall back to non-streaming
+  try {
+    const controller = new AbortController();
+    const onSigint = () => controller.abort();
+    process.once("SIGINT", onSigint);
+    let hasOutput = false;
+
+    try {
+      await bridge.callStream("llm_stream", {
+        messages: [{ role: "user", content: input }],
+      }, {
+        onChunk: (token: string) => {
+          process.stdout.write(token);
+          hasOutput = true;
+        },
+        signal: controller.signal,
+      });
+      if (hasOutput) console.log(); // newline after stream
+    } finally {
+      process.off("SIGINT", onSigint);
+    }
+  } catch {
+    // Fallback to non-streaming
+    const response = await bridge.call<{ content: string }>("llm_chat", {
+      messages: [{ role: "user", content: input }],
+    });
+    renderMarkdown(response.content);
+  }
 }

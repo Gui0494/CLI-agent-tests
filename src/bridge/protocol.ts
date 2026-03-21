@@ -129,6 +129,16 @@ export const RpcMethodSchemas = {
   restore_backup: z.object({
     backup_path: z.string().min(1).max(4096),
   }),
+
+  // Multi-file atomic edits
+  batch_edit: z.object({
+    edits: z.array(z.object({
+      path: z.string().max(4096),
+      old_text: z.string().max(100_000),
+      new_text: z.string().max(100_000),
+    })).min(1).max(50),
+    description: z.string().max(500).optional(),
+  }),
 } as const;
 
 export type RpcMethodName = keyof typeof RpcMethodSchemas;

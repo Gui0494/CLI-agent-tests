@@ -176,6 +176,67 @@ export class PythonBridge extends TypedEventEmitter {
     });
   }
 
+  /**
+   * Call a Python method that streams token-by-token via JSON-RPC notifications.
+   * Listens for "stream_chunk" notifications and calls onChunk for each.
+   */
+  async callStream(
+    method: string,
+    params: Record<string, unknown>,
+    opts: { onChunk: (token: string) => void; signal?: AbortSignal },
+  ): Promise<void> {
+    if (!this.process) throw new Error("Python bridge not started");
+
+    const id = ++this.requestId;
+    const request = createRequest(method, params, id);
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        cleanup();
+        reject(new Error(`Stream '${method}' timed out after 120s`));
+      }, 120000);
+
+      const onAbort = () => {
+        cleanup();
+        resolve();
+      };
+
+      if (opts.signal) {
+        opts.signal.addEventListener("abort", onAbort, { once: true });
+      }
+
+      // Listen for notification events (emitted by processBuffer for id-less messages)
+      const onNotification = (...args: unknown[]) => {
+        const notification = args[0] as { method: string; params: Record<string, unknown> };
+        if (notification.method === "stream_chunk" && (notification.params as any)?.request_id === id) {
+          const token = (notification.params as any)?.token;
+          if (token) opts.onChunk(token);
+        }
+      };
+
+      const cleanup = () => {
+        clearTimeout(timeout);
+        this.off("notification", onNotification);
+        this.pending.delete(id);
+        if (opts.signal) opts.signal.removeEventListener("abort", onAbort);
+      };
+
+      // Listen for final response (stream complete)
+      this.pending.set(id, {
+        resolve: () => { cleanup(); resolve(); },
+        reject: (err) => { cleanup(); reject(err); },
+      });
+
+      this.on("notification", onNotification);
+
+      this.process!.stdin!.write(request, (err) => {
+        if (!err) return;
+        cleanup();
+        reject(err);
+      });
+    });
+  }
+
   stop(): void {
     PythonBridge.unregisterInstance(this);
     if (this.process) {
@@ -214,8 +275,14 @@ export class PythonBridge extends TypedEventEmitter {
 
         const parsed = JSON.parse(trimmed);
 
-        // Detect incoming requests from Python (has method field)
+        // Detect incoming requests/notifications from Python (has method field)
         if (parsed.method && typeof parsed.method === "string") {
+          // JSON-RPC notifications (no id) — emit as notification event
+          if (parsed.id == null) {
+            this.emit("notification", { method: parsed.method, params: parsed.params ?? {} });
+            continue;
+          }
+
           // Validate incoming request params against schema
           try {
             const validatedParams = validateMethodParams(parsed.method, parsed.params ?? {});

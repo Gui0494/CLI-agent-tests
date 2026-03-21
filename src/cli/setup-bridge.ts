@@ -83,6 +83,17 @@ export function setupBridgeHandlers(
             } catch (err: unknown) {
                 bridge.sendResponse(req.id, null, { code: -32000, message: (err as Error).message });
             }
+        } else if (req.method === "batch_edit") {
+            // Multi-file atomic edits
+            try {
+                const { BatchEditor } = await import("../editor/batch-edit.js");
+                const editor = new BatchEditor();
+                const { edits } = req.params as { edits: Array<{ path: string; old_text: string; new_text: string }> };
+                const result = await editor.apply(edits);
+                bridge.sendResponse(req.id, result);
+            } catch (err: unknown) {
+                bridge.sendResponse(req.id, null, { code: -32000, message: (err as Error).message });
+            }
         } else if (req.method === "run_node_tool") {
             const { tool_name, tool_args: raw_args } = req.params as { tool_name: string; tool_args: Record<string, unknown> };
             const tool_args = raw_args as any; // Args are validated by Python before dispatch
