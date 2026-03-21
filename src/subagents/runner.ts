@@ -124,13 +124,19 @@ export class SubagentRunner {
   ): Promise<SubagentRunResult> {
     const userMessage = this.buildUserMessage(task);
 
-    // Create a timeout promise
+    // Create a timeout promise with cleanup
+    let timeoutId: ReturnType<typeof setTimeout>;
     const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error(`Timeout: subagent "${def.name}" excedeu ${timeout / 1000}s`)), timeout);
+      timeoutId = setTimeout(() => reject(new Error(`Timeout: subagent "${def.name}" excedeu ${timeout / 1000}s`)), timeout);
     });
 
     const llmPromise = this.config.llmCall!(def.systemPrompt, userMessage);
-    const rawOutput = await Promise.race([llmPromise, timeoutPromise]);
+    let rawOutput: string;
+    try {
+      rawOutput = await Promise.race([llmPromise, timeoutPromise]);
+    } finally {
+      clearTimeout(timeoutId!);
+    }
     const tokensUsed = Math.ceil(rawOutput.length / 4);
 
     // Try to parse structured result
