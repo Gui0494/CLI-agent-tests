@@ -7,15 +7,23 @@ import { createExecutor } from "./executor/runner.js";
 import { createVerifier } from "./verifier/test-runner.js";
 import { createRepoAgent } from "./repo-agent/github.js";
 import { PythonBridge } from "./bridge/python-bridge.js";
+import { checkForUpdate } from "./cli/update-check.js";
 
 config();
+
+// Non-blocking update notification
+checkForUpdate("0.1.0");
 
 const program = new Command();
 
 program
   .name("aurex")
   .description("AurexAI - Local CLI Agent for code editing, web search, planning, and execution")
-  .version("0.1.0");
+  .version("0.1.0")
+  .option("--no-color", "Disable color output")
+  .option("--non-interactive", "Run in non-interactive mode (disable prompts)")
+  .option("--continue", "Resume the most recent session")
+  .option("--resume <session-id>", "Resume a specific session by ID");
 
 program
   .command("interactive")

@@ -1,6 +1,5 @@
 import * as readline from "readline";
 import * as fs from "fs";
-import * as os from "os";
 import * as path from "path";
 import chalk from "chalk";
 import { PythonBridge } from "../bridge/python-bridge.js";
@@ -8,7 +7,7 @@ import { createExecutor } from "../executor/runner.js";
 import { createVerifier } from "../verifier/test-runner.js";
 import { readFile, writeFile } from "../editor/file-ops.js";
 import { renderMarkdown, renderCitations, Citation } from "./renderer.js";
-import { COMMANDS, getHelp } from "./commands.js";
+import { getHelp } from "./commands.js";
 import { createAppContext } from "../context.js";
 import { setupBridgeHandlers } from "./setup-bridge.js";
 import { getHookEngine, HookEvent } from "../hooks/engine.js";
@@ -16,11 +15,12 @@ import { preShellHook } from "../hooks/rules/pre-shell.js";
 import { postEditHook } from "../hooks/rules/post-edit.js";
 import { workspaceSandboxHook } from "../hooks/rules/workspace-sandbox.js";
 import { runDoctor, printDoctorResult } from "../hooks/rules/on-session-start.js";
+import { NEW_SLASH_COMMANDS, buildCommandMap, SlashCommandContext } from "./slash-commands/index.js";
+import { getConfigDir } from "../config/paths.js";
+import { McpManager } from "../mcp/manager.js";
+import { SessionStore } from "../memory/session-store.js";
 
-const CONFIG_DIR = path.join(os.homedir(), ".config", "aurex");
-if (!fs.existsSync(CONFIG_DIR)) {
-  fs.mkdirSync(CONFIG_DIR, { recursive: true });
-}
+const CONFIG_DIR = getConfigDir();
 const HISTORY_FILE = path.join(CONFIG_DIR, "history");
 
 function parseCommandArgs(input: string): string[] {
@@ -47,8 +47,13 @@ export async function startRepl(): Promise<void> {
     console.log(chalk.gray("  Run: cd python && pip install -e .\n"));
   }
 
+  const newCommandNames = NEW_SLASH_COMMANDS.map(c => `/${c.name}`);
   const completer = (line: string) => {
-    const completions = ["/help", "/search", "/exec", "/edit", "/test", "/plan", "/agent", "/read", "/fetch", "/exit"];
+    const completions = [
+      "/help", "/search", "/exec", "/edit", "/test", "/plan",
+      "/agent", "/read", "/fetch", "/exit",
+      ...newCommandNames,
+    ];
     const hits = completions.filter((c) => c.startsWith(line));
     return [hits.length ? hits : completions, line];
   };
@@ -83,6 +88,21 @@ export async function startRepl(): Promise<void> {
   });
 
   setupBridgeHandlers(bridge, appContext, rl, {});
+
+  // Start session persistence
+  const sessionStore = new SessionStore();
+  sessionStore.open();
+
+  // Start MCP servers (non-blocking)
+  const mcpManager = new McpManager();
+  const mcpConfigs = McpManager.loadConfigs(process.cwd());
+  if (Object.keys(mcpConfigs).length > 0) {
+    mcpManager.startAll(mcpConfigs).then(() => {
+      if (mcpManager.serverCount > 0) {
+        console.log(chalk.gray(`  MCP: ${mcpManager.serverCount} server(s) connected`));
+      }
+    }).catch(() => { /* MCP startup failures are non-fatal */ });
+  }
 
   // Load history
   if (fs.existsSync(HISTORY_FILE)) {
@@ -119,11 +139,15 @@ export async function startRepl(): Promise<void> {
   });
 
   rl.on("close", () => {
+    sessionStore.close();
+    mcpManager.stopAll();
     bridge.stop();
     console.log(chalk.gray("\nGoodbye!"));
     process.exit(0);
   });
 }
+
+const _newCommandMap = buildCommandMap(NEW_SLASH_COMMANDS);
 
 async function handleCommand(
   input: string,
@@ -135,6 +159,14 @@ async function handleCommand(
   const cmd = parts[0];
   const args = parts.slice(1).join(" "); // Re-join for backward compatibility with some commands, or they can use parts
   const parsedArgs = parts.slice(1);
+
+  // Check new slash commands first
+  const newCmd = _newCommandMap.get(cmd);
+  if (newCmd) {
+    const ctx: SlashCommandContext = { bridge, executor, appContext };
+    await newCmd.handler(args, ctx);
+    return;
+  }
 
   switch (cmd) {
     case "help":
@@ -285,6 +317,26 @@ async function handleChat(input: string, bridge: PythonBridge): Promise<void> {
     console.log(chalk.gray("  You can still use local tools like /exec, /read, etc."));
     return;
   }
+
+  // Attempt streaming first; fall back to buffered call
+  try {
+    let hasTokens = false;
+    await bridge.stream(
+      "llm_chat_stream",
+      { messages: [{ role: "user", content: input }] },
+      (token) => {
+        hasTokens = true;
+        process.stdout.write(token);
+      }
+    );
+    if (hasTokens) {
+      process.stdout.write("\n");
+      return;
+    }
+  } catch {
+    // Streaming not supported by Python side — fall back to buffered
+  }
+
   const response = await bridge.call<{ content: string }>("llm_chat", {
     messages: [{ role: "user", content: input }],
   });

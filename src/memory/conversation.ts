@@ -144,19 +144,22 @@ export class ConversationStore {
   }
 
   /**
-   * Manual compression trigger.
+   * Manual compression trigger with optional custom instructions.
    */
-  compress(): { pruned: number; summarized: number; truncated: number } {
+  compress(instructions?: string): { pruned: number; summarized: number; truncated: number; checklist: string } {
     let pruned = 0;
     let summarized = 0;
     let truncated = 0;
 
+    // Build structured compaction checklist before compressing
+    const checklist = this.buildCompactionChecklist(instructions);
+
     // Stage 1: Prune old tool results
     pruned = this.pruneToolResults(5);
 
-    // Stage 2: Summarize old messages (collapse sequences)
+    // Stage 2: Summarize old messages with structured checklist
     if (this.getUtilization() > this.config.compressionThresholds.messageSummarize) {
-      summarized = this.summarizeOldMessages();
+      summarized = this.summarizeWithChecklist(checklist);
     }
 
     // Stage 3: Truncate if still over
@@ -164,7 +167,52 @@ export class ConversationStore {
       truncated = this.truncate(50);
     }
 
-    return { pruned, summarized, truncated };
+    return { pruned, summarized, truncated, checklist };
+  }
+
+  /**
+   * Build a structured compaction checklist from the current conversation state.
+   * Preserves: work state, decisions, edited files, task list, key snippets.
+   */
+  buildCompactionChecklist(customInstructions?: string): string {
+    const editedFiles = new Set<string>();
+    const decisions: string[] = [];
+    const taskItems: string[] = [];
+    const codeSnippets: string[] = [];
+
+    for (const msg of this.messages) {
+      // Track edited files from tool calls
+      if (msg.metadata.toolCalls) {
+        for (const tc of msg.metadata.toolCalls) {
+          if (['edit_file', 'write_file', 'Write', 'Edit'].includes(tc.name)) {
+            const file = (tc.args.path || tc.args.file_path || tc.args.file) as string;
+            if (file) editedFiles.add(file);
+          }
+        }
+      }
+
+      // Extract decisions (assistant messages with decision keywords)
+      if (msg.role === 'assistant' && msg.content.length > 20) {
+        const lower = msg.content.toLowerCase();
+        if (lower.includes('decided') || lower.includes('choosing') ||
+            lower.includes('will use') || lower.includes('approach:')) {
+          decisions.push(msg.content.slice(0, 150));
+        }
+      }
+    }
+
+    const sections = [
+      '## Compaction Checklist',
+      `- **Files being edited**: ${editedFiles.size > 0 ? [...editedFiles].join(', ') : 'none'}`,
+      `- **Decisions made**: ${decisions.length > 0 ? decisions.map(d => d.trim()).join('; ') : 'none'}`,
+      `- **Message count**: ${this.messages.length} (${this.totalTokens} tokens)`,
+    ];
+
+    if (customInstructions) {
+      sections.push(`- **Custom focus**: ${customInstructions}`);
+    }
+
+    return sections.join('\n');
   }
 
   // ─── Private ───────────────────────────────────────────
@@ -208,18 +256,17 @@ export class ConversationStore {
   }
 
   /**
-   * Collapse old message sequences into summaries.
+   * Collapse old message sequences into a structured checklist summary.
    * Keeps the 30 most recent messages intact.
    */
-  private summarizeOldMessages(): number {
+  private summarizeWithChecklist(checklist: string): number {
     if (this.messages.length <= 30) return 0;
 
     const keepRecent = 30;
     const oldMessages = this.messages.slice(0, -keepRecent);
     const recentMessages = this.messages.slice(-keepRecent);
 
-    // Collapse old messages into a summary message
-    const summaryContent = `[Conversa anterior: ${oldMessages.length} mensagens comprimidas]`;
+    const summaryContent = checklist + `\n- **Compressed**: ${oldMessages.length} messages removed`;
     const summaryMsg: Message = {
       role: 'assistant',
       content: summaryContent,
@@ -236,6 +283,15 @@ export class ConversationStore {
 
     this.messages = [summaryMsg, ...recentMessages];
     return oldMessages.length;
+  }
+
+  /**
+   * Legacy: Collapse old message sequences into summaries.
+   * Kept for autoCompress backward compatibility.
+   */
+  private summarizeOldMessages(): number {
+    const checklist = this.buildCompactionChecklist();
+    return this.summarizeWithChecklist(checklist);
   }
 
   /**

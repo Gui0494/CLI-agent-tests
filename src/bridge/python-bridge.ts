@@ -1,6 +1,6 @@
 import { spawn, ChildProcess } from "child_process";
 import { EventEmitter } from "events";
-import { createRequest, parseResponse, JsonRpcResponse } from "./protocol.js";
+import { createRequest, parseResponse } from "./protocol.js";
 import * as path from "path";
 import * as os from "os";
 import { fileURLToPath } from "url";
@@ -114,14 +114,43 @@ export class PythonBridge extends TypedEventEmitter {
     PythonBridge.registerInstance(this);
   }
 
+  /** Abort only pending requests without stopping the bridge process. */
+  abortPending(): void {
+    this.abortAll(new Error("User interrupted operation"));
+  }
+
   private static registerInstance(instance: PythonBridge): void {
     PythonBridge.activeInstances.add(instance);
     if (!PythonBridge.globalSigintHandler) {
+      let lastSigint = 0;
       PythonBridge.globalSigintHandler = () => {
-        for (const inst of PythonBridge.activeInstances) {
-          inst.abortAll(new Error("User interrupted operation"));
-          inst.stop();
+        const now = Date.now();
+        const hasPending = Array.from(PythonBridge.activeInstances).some(
+          (inst) => inst.pending.size > 0
+        );
+
+        if (hasPending) {
+          // First Ctrl-C: cancel active requests, keep bridge alive
+          for (const inst of PythonBridge.activeInstances) {
+            inst.abortPending();
+          }
+          console.log("\n[Interrupted — cancelled active request]");
+          lastSigint = now;
+          return;
         }
+
+        if (now - lastSigint < 2000) {
+          // Second Ctrl-C within 2s: hard exit
+          for (const inst of PythonBridge.activeInstances) {
+            inst.stop();
+          }
+          console.log("\nForce exit");
+          process.exit(1);
+        }
+
+        // No pending requests, first Ctrl-C: signal graceful shutdown
+        console.log("\n[Press Ctrl-C again within 2s to exit]");
+        lastSigint = now;
       };
       process.on("SIGINT", PythonBridge.globalSigintHandler);
     }
@@ -174,6 +203,63 @@ export class PythonBridge extends TypedEventEmitter {
         reject(err);
       });
     });
+  }
+
+  /**
+   * Stream a response from the Python bridge, emitting partial tokens
+   * via the onToken callback. Falls back to buffered `call()` if the
+   * bridge doesn't send streaming notifications.
+   */
+  async stream(
+    method: string,
+    params: Record<string, unknown>,
+    onToken: (token: string) => void,
+    timeoutMs = 60000
+  ): Promise<void> {
+    if (!this.process) throw new Error("Python bridge not started");
+
+    const id = ++this.requestId;
+    const request = createRequest(method, params, id);
+
+    // Listen for streaming notifications keyed to this request
+    const notifHandler = ((...args: unknown[]) => {
+      const parsed = args[0] as BridgeRequest;
+      if (parsed.method === "stream_token" && (parsed.params as any)?.request_id === id) {
+        onToken((parsed.params as any).token ?? "");
+      }
+    });
+    this.on("request", notifHandler);
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          if (this.pending.has(id)) {
+            this.pending.delete(id);
+            reject(new Error(`Stream '${method}' timed out after ${timeoutMs}ms`));
+          }
+        }, timeoutMs);
+
+        this.pending.set(id, {
+          resolve: () => {
+            clearTimeout(timeout);
+            resolve();
+          },
+          reject: (error) => {
+            clearTimeout(timeout);
+            reject(error);
+          },
+        });
+
+        this.process!.stdin!.write(request, (err) => {
+          if (!err) return;
+          clearTimeout(timeout);
+          this.pending.delete(id);
+          reject(err);
+        });
+      });
+    } finally {
+      this.off("request", notifHandler);
+    }
   }
 
   stop(): void {

@@ -12,12 +12,14 @@ import {
     handleGrep,
     handleCreateAgent
 } from "./tool-handlers.js";
+import { McpManager } from "../mcp/manager.js";
 
 export function setupBridgeHandlers(
   bridgeArg: PythonBridge,
   appContext: AppContext,
   rl?: readline.Interface,
-  executorOptions?: ExecutorConfig
+  executorOptions?: ExecutorConfig,
+  mcpManager?: McpManager
 ) {
     const bridge = bridgeArg;
 
@@ -112,6 +114,17 @@ export function setupBridgeHandlers(
                     });
                 }
 
+                bridge.sendResponse(req.id, result);
+            } catch (err: unknown) {
+                bridge.sendResponse(req.id, null, { code: -32000, message: (err as Error).message });
+            } finally {
+                bridge.emit("resume_spinner");
+            }
+        } else if (req.method === "run_mcp_tool" && mcpManager) {
+            const { tool_name, tool_args } = req.params as { tool_name: string; tool_args: Record<string, unknown> };
+            bridge.emit("pause_spinner");
+            try {
+                const result = await mcpManager.callTool(tool_name, tool_args);
                 bridge.sendResponse(req.id, result);
             } catch (err: unknown) {
                 bridge.sendResponse(req.id, null, { code: -32000, message: (err as Error).message });

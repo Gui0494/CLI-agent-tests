@@ -64,3 +64,30 @@ export function getConfigDir(appName = "aurex"): string {
 
     return dir;
 }
+
+export function getDataDir(appName = "aurex"): string {
+    const platform = os.platform();
+    const home = os.homedir();
+    let baseDir: string;
+
+    if (platform === "win32") {
+        baseDir = process.env.APPDATA || path.join(home, "AppData", "Roaming");
+    } else if (platform === "darwin") {
+        baseDir = path.join(home, "Library", "Application Support");
+    } else {
+        // Linux and others — XDG_DATA_HOME
+        baseDir = process.env.XDG_DATA_HOME || path.join(home, ".local", "share");
+    }
+
+    const dir = path.join(baseDir, appName);
+    try {
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+        }
+    } catch {
+        // Fallback
+        return process.cwd();
+    }
+
+    return dir;
+}
