@@ -23,6 +23,21 @@ declare class NodeEventEmitter {
 }
 const TypedEventEmitter = EventEmitter as unknown as { new(): NodeEventEmitter };
 
+// ─── Rate Limiter ──────────────────────────────────────
+
+export interface BridgeRateLimitConfig {
+  maxCallsPerSecond: number;
+  maxCallsPerMinute: number;
+}
+
+const DEFAULT_RATE_LIMIT: BridgeRateLimitConfig = {
+  maxCallsPerSecond: 10,
+  maxCallsPerMinute: 120,
+};
+
+// Methods exempt from rate limiting (handshake + streaming notifications)
+const RATE_LIMIT_EXEMPT = new Set(["ready", "stream_chunk"]);
+
 export class PythonBridge extends TypedEventEmitter {
   private static activeInstances = new Set<PythonBridge>();
   private static globalSigintHandler: (() => void) | null = null;
@@ -32,8 +47,51 @@ export class PythonBridge extends TypedEventEmitter {
   private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
   private buffer = "";
 
+  // Rate limiting state
+  private callTimestamps: number[] = [];
+  private rateLimitConfig: BridgeRateLimitConfig;
+
+  constructor(rateLimitConfig?: Partial<BridgeRateLimitConfig>) {
+    super();
+    this.rateLimitConfig = { ...DEFAULT_RATE_LIMIT, ...rateLimitConfig };
+  }
+
   isStarted(): boolean {
     return this.process !== null;
+  }
+
+  /**
+   * Wait if rate limits are exceeded. Sliding window approach.
+   * Delays instead of rejecting to avoid breaking the agent loop.
+   */
+  private async enforceRateLimit(method: string): Promise<void> {
+    if (RATE_LIMIT_EXEMPT.has(method)) return;
+
+    const now = Date.now();
+
+    // Prune timestamps older than 60s
+    this.callTimestamps = this.callTimestamps.filter(t => now - t < 60000);
+
+    // Check per-second burst limit (last 1000ms)
+    const recentSecond = this.callTimestamps.filter(t => now - t < 1000);
+    if (recentSecond.length >= this.rateLimitConfig.maxCallsPerSecond) {
+      const waitMs = 1000 - (now - recentSecond[0]);
+      if (waitMs > 0) {
+        console.error(`[python-bridge] Rate limited: ${recentSecond.length} calls in last 1s, waiting ${waitMs}ms`);
+        await new Promise(r => setTimeout(r, waitMs));
+      }
+    }
+
+    // Check per-minute limit
+    if (this.callTimestamps.length >= this.rateLimitConfig.maxCallsPerMinute) {
+      const waitMs = 60000 - (now - this.callTimestamps[0]);
+      if (waitMs > 0) {
+        console.error(`[python-bridge] Rate limited: ${this.callTimestamps.length} calls in last 60s, waiting ${waitMs}ms`);
+        await new Promise(r => setTimeout(r, Math.min(waitMs, 5000)));
+      }
+    }
+
+    this.callTimestamps.push(Date.now());
   }
 
   async start(): Promise<void> {
@@ -144,6 +202,8 @@ export class PythonBridge extends TypedEventEmitter {
 
   async call<T = unknown>(method: string, params: Record<string, unknown> = {}, timeoutMs = 60000): Promise<T> {
     if (!this.process) throw new Error("Python bridge not started");
+
+    await this.enforceRateLimit(method);
 
     const id = ++this.requestId;
     const request = createRequest(method, params, id);

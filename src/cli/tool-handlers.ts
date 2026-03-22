@@ -280,6 +280,22 @@ export async function handleCreateAgent(tool_args: CreateAgentArgs, ask: AskFunc
     
     const creationRes = await runCreate();
     if (creationRes.response.status === "success" || creationRes.response.status === "partial") {
+        // Validate generated skill code before accepting
+        const generatedCode = typeof creationRes.response.code === "string" ? creationRes.response.code : "";
+        if (generatedCode) {
+            const { validateSkillCode } = await import("../security/skill-validator.js");
+            const validation = validateSkillCode(generatedCode);
+            if (!validation.valid) {
+                const criticals = validation.violations
+                    .filter(v => v.severity === "critical")
+                    .map(v => `  L${v.line}: ${v.pattern} → ${v.snippet}`)
+                    .join("\n");
+                return {
+                    ok: false,
+                    error: `Generated skill rejected by security validator:\n${criticals}`,
+                };
+            }
+        }
         return { ok: true, message: `Agente ${agent_name} criado com sucesso e adicionado ao AurexAI dinamicamente!`, details: creationRes.response };
     } else {
         return { ok: false, error: `Falha na criação: ${creationRes.response?.error?.message || "Erro desconhecido"}` };

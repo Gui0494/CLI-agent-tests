@@ -98,7 +98,15 @@ export const WARN_PATTERNS: RegExp[] = [
 
 // ─── Classification ─────────────────────────────────────
 
-export type CommandClassification = 'allow' | 'block' | 'warn';
+/**
+ * @security-note Classification levels:
+ * - 'allow': safe to execute
+ * - 'warn_destructive': matches a destructive pattern — display a prominent
+ *   warning and require explicit user confirmation. This is a UX guardrail
+ *   only; real security comes from the Docker sandbox + permission approvals.
+ * - 'warn': potentially dangerous — request confirmation
+ */
+export type CommandClassification = 'allow' | 'warn_destructive' | 'warn';
 
 export interface ClassificationResult {
   classification: CommandClassification;
@@ -108,16 +116,21 @@ export interface ClassificationResult {
 }
 
 /**
- * Classify a shell command as 'allow', 'block', or 'warn'.
+ * Classify a shell command as 'allow', 'warn_destructive', or 'warn'.
+ *
+ * @security-note This regex-based classification is trivially bypassable
+ * and must NOT be used as a security boundary. It exists solely as a
+ * defense-in-depth UX warning to catch accidental destructive commands.
+ * Real security is enforced by the Docker sandbox and user permission system.
  */
 export function classifyCommand(command: string): ClassificationResult {
-  // Check blocklist first (most restrictive)
+  // Check destructive patterns first (most severe warning)
   for (const pattern of BLOCKED_PATTERNS) {
     if (pattern.test(command)) {
       return {
-        classification: 'block',
-        reason: `Command blocked for security: "${command}" matches destructive pattern.`,
-        suggestion: 'This type of command cannot be executed by the agent.',
+        classification: 'warn_destructive',
+        reason: `Destructive command detected: "${command}" matches a dangerous pattern.`,
+        suggestion: 'This command may cause irreversible damage. Requires explicit user confirmation.',
         matchedPattern: pattern.source,
       };
     }
@@ -144,5 +157,5 @@ export function classifyCommand(command: string): ClassificationResult {
  */
 export function isUnsafeCommand(command: string): boolean {
   const result = classifyCommand(command);
-  return result.classification === 'block' || result.classification === 'warn';
+  return result.classification === 'warn_destructive' || result.classification === 'warn';
 }

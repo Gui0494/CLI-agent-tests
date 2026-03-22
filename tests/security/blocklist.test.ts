@@ -23,10 +23,11 @@ describe("BLOCKED_PATTERNS", () => {
     "Format-Volume",
   ];
 
-  it.each(blocked)("blocks: %s", (cmd) => {
+  it.each(blocked)("warns destructive: %s", (cmd) => {
     const result = classifyCommand(cmd);
-    expect(result.classification).toBe("block");
+    expect(result.classification).toBe("warn_destructive");
     expect(result.reason).toBeDefined();
+    expect(result.suggestion).toContain("user confirmation");
   });
 });
 

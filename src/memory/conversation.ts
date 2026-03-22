@@ -1,6 +1,10 @@
 /**
  * conversation.ts — Conversation store with compression
  *
+ * This is the **canonical source of truth** for the current session's messages.
+ * The Python-side ContextManager handles only disk persistence for cross-session
+ * continuity and execution trace for the current agent loop.
+ *
  * Reference: docs/architecture-reference/specs/memory.md §3 ConversationStore
  */
 
@@ -141,6 +145,14 @@ export class ConversationStore {
   clear(): void {
     this.messages = [];
     this.totalTokens = 0;
+  }
+
+  /**
+   * Export messages in a format suitable for syncing to the Python ContextManager.
+   * Used by the bridge to keep both runtimes in sync.
+   */
+  getStateForSync(): Array<{ role: string; content: string }> {
+    return this.messages.map(m => ({ role: m.role, content: m.content }));
   }
 
   /**

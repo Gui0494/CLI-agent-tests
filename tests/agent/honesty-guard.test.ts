@@ -87,4 +87,50 @@ describe("HonestyGuard", () => {
       expect(claims).toHaveLength(0);
     });
   });
+
+  describe("path-aware tool call matching", () => {
+    it("validates when claimed file matches tool call path", () => {
+      guard.onToolExecuted({
+        id: "tc-1",
+        name: "write_file",
+        args: { path: "src/foo.ts" },
+        timestamp: Date.now(),
+      });
+      const result = guard.validateForMode("I created foo.ts with the new logic", Mode.ACT);
+      expect(result.valid).toBe(true);
+    });
+
+    it("rejects when claimed file does NOT match tool call path", () => {
+      guard.onToolExecuted({
+        id: "tc-1",
+        name: "write_file",
+        args: { path: "src/foo.ts" },
+        timestamp: Date.now(),
+      });
+      const result = guard.validateForMode("I edited bar.ts successfully", Mode.ACT);
+      expect(result.valid).toBe(false);
+    });
+
+    it("allows generic claims (no file path) with any write tool", () => {
+      guard.onToolExecuted({
+        id: "tc-1",
+        name: "edit_file",
+        args: { path: "src/foo.ts" },
+        timestamp: Date.now(),
+      });
+      const result = guard.validateForMode("I edited the configuration file", Mode.ACT);
+      expect(result.valid).toBe(true);
+    });
+
+    it("validates when tool has no path arg (fallback)", () => {
+      guard.onToolExecuted({
+        id: "tc-1",
+        name: "write_file",
+        args: { content: "hello" },
+        timestamp: Date.now(),
+      });
+      const result = guard.validateForMode("I created utils.ts", Mode.ACT);
+      expect(result.valid).toBe(true);
+    });
+  });
 });

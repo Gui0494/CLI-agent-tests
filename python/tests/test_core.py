@@ -98,3 +98,37 @@ async def test_agent_loop_flow(mock_fc_run):
     trace = cm.get_long_term_context()
     assert len(trace) > 0
     assert trace[-1]["content"] == "Hello world"
+
+
+class TestContextManagerSync:
+    def test_sync_from_node_replaces_memory(self):
+        cm = ContextManager(max_history=20)
+        cm.long_term_memory = [{"role": "user", "content": "old message"}]
+
+        node_messages = [
+            {"role": "user", "content": "msg 1"},
+            {"role": "assistant", "content": "reply 1"},
+            {"role": "user", "content": "msg 2"},
+        ]
+        count = cm.sync_from_node(node_messages)
+
+        assert count == 3
+        assert len(cm.long_term_memory) == 3
+        assert cm.long_term_memory[0]["content"] == "msg 1"
+        assert cm.long_term_memory[2]["content"] == "msg 2"
+
+    def test_sync_from_node_empty_list(self):
+        cm = ContextManager()
+        cm.long_term_memory = [{"role": "user", "content": "keep this"}]
+        count = cm.sync_from_node([])
+        assert count == 0
+        # Should not overwrite when empty
+        assert len(cm.long_term_memory) == 1
+
+    def test_sync_preserves_execution_trace(self):
+        cm = ContextManager()
+        cm.add_execution_step({"tool": "read_file", "result": "ok"})
+        cm.sync_from_node([{"role": "user", "content": "synced"}])
+        # Execution trace should be independent
+        assert len(cm.get_short_term_context()) == 1
+        assert cm.get_short_term_context()[0]["tool"] == "read_file"

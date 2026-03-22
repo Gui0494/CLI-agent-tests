@@ -11,6 +11,7 @@ from aurex.core.context_manager import ContextManager
 from aurex.core.tool_registry import ToolRegistry
 from aurex.core.skill_loader import SkillLoader
 from aurex.core.verification import VerificationPipeline
+from aurex.prompts import load_prompt
 
 try:
     from aurex.skills.function_calling.run import run as function_calling_run
@@ -86,25 +87,8 @@ class AgentLoop:
             except Exception:
                 pass
 
-        # Enforce strict SOP for the agent
-        sop_prompt = (
-            "You are an elite, autonomous Senior CLI Agent.\n"
-            "THE GOLDEN RULE OF HONESTY: NEVER say you created, saved, moved, installed, or edited a file unless you have specifically called a tool to do so AND that tool returned a success message. DO NOT simulate execution.\n"
-            "You MUST strictly follow this execution pipeline for every request:\n"
-            "1. READ: Use `list_files` and `read_file` to understand the user's current project structure. If the project doesn't exist, prepare to build it from scratch.\n"
-            "2. THINK & PLAN: Analyze the requirements and mentally plan the architecture.\n"
-            "3. CODE: Use `write_file` (for new files) or `edit_file` (for existing files) to implement the plan.\n"
-            "4. REVIEW: Review your own code carefully. Fix any obvious errors immediately using `edit_file`.\n"
-            "5. TEST: Use `exec_command` to run tests, linters, or compile the code (e.g. `npm run build`, `python -m pytest`, `node script.js`). If tests fail, YOU MUST FIX THEM and run tests again.\n"
-            "6. DELIVER: Only when the code is written, reviewed, and tests pass, deliver the final summary to the user.\n\n"
-            "MISSION PANEL FORMAT:\n"
-            "You MUST discard conversational filler (e.g., 'Estou pensando', 'Beleza!'). "
-            "Your final text response MUST strictly use this exact format:\n\n"
-            "[Goal]\n(Brief 1 sentence objective)\n\n"
-            "[Understanding]\n- (Bullet points about current architecture and constraints)\n\n"
-            "[Plan]\n1. (Step 1)\n2. (Step 2)\n\n"
-            "[Actions]\n- (Summarize tool calls made, e.g., 'Read src/auth.ts', 'Patched middleware.ts')\n\n"
-        )
+        # Enforce strict SOP for the agent (loaded from prompts/sop.md)
+        sop_prompt = load_prompt("sop")
         
         fc_params = {
             "messages": messages,
@@ -119,27 +103,59 @@ class AgentLoop:
             )
         }
 
+        # Destructive tool checkpoint system (Finding 4)
+        # Snapshots files before each destructive tool call for rollback on cascading failures
+        DESTRUCTIVE_TOOLS = {"write_file", "edit_file", "exec_command", "batch_edit", "delete_file"}
+        checkpoint_stack: list = []
+        consecutive_errors = 0
+        MAX_CONSECUTIVE_ERRORS = 3
+
         # Tool executor — skills are declarative-only (no executable modules),
         # so all execution goes through the registry.
         async def combined_executor(tool_name: str, args: dict) -> Any:
+            nonlocal consecutive_errors
+
+            # Checkpoint before destructive tool calls
+            if tool_name in DESTRUCTIVE_TOOLS and self.verifier:
+                affected_path = args.get("path", args.get("file_path", ""))
+                if affected_path:
+                    checkpoint = self.verifier.create_snapshot([affected_path])
+                    checkpoint_stack.append({"tool": tool_name, "path": affected_path, "snapshot": checkpoint})
+
+            result: Any = None
             if tool_name in self.loader.loaded_skills:
                 skill = self.loader.loaded_skills[tool_name]
                 if skill.get("module") is not None and hasattr(skill["module"], "run"):
                     # Legacy skill with executable module (pre-installed, trusted)
                     run_func = skill["module"].run
                     try:
-                        return await run_func(args, self.registry)
+                        result = await run_func(args, self.registry)
                     except Exception as e:
-                        return {"error": f"Skill execution failed: {str(e)}"}
+                        result = {"error": f"Skill execution failed: {str(e)}"}
                 else:
                     # Declarative skill — no executable code
-                    return {"error": f"Skill '{tool_name}' is declarative-only and cannot be directly executed as a tool."}
+                    result = {"error": f"Skill '{tool_name}' is declarative-only and cannot be directly executed as a tool."}
             else:
                 # Core tool from registry
                 try:
-                    return await self.registry.execute(tool_name, args)
+                    result = await self.registry.execute(tool_name, args)
                 except Exception as e:
-                    return {"error": f"Tool execution failed: {str(e)}"}
+                    result = {"error": f"Tool execution failed: {str(e)}"}
+
+            # Track consecutive errors for cascading failure detection
+            if isinstance(result, dict) and result.get("error"):
+                consecutive_errors += 1
+                if consecutive_errors >= MAX_CONSECUTIVE_ERRORS and checkpoint_stack:
+                    import sys
+                    print(f"[agent] {consecutive_errors} consecutive tool errors detected. "
+                          f"Rolling back to last checkpoint.", file=sys.stderr)
+                    last = checkpoint_stack[-1]
+                    self.verifier.restore_snapshot(last["snapshot"])
+                    consecutive_errors = 0
+            else:
+                consecutive_errors = 0
+
+            return result
 
         fc_params["tool_executor"] = combined_executor
 

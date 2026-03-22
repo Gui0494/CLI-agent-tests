@@ -147,33 +147,67 @@ export class HonestyGuard {
   }
 
   /**
+   * Extract file paths mentioned in a claim text.
+   * Matches patterns like: foo.ts, src/bar.js, "path/to/file.py", etc.
+   */
+  private extractClaimedPaths(text: string): string[] {
+    const pathPattern = /(?:["'`]([^"'`\s]+\.[a-zA-Z]{1,10})["'`])|(?:\b((?:[\w./-]+\/)?[\w.-]+\.[a-zA-Z]{1,10})\b)/g;
+    const paths: string[] = [];
+    let match: RegExpExecArray | null;
+    while ((match = pathPattern.exec(text)) !== null) {
+      const p = match[1] || match[2];
+      if (p) paths.push(p);
+    }
+    return paths;
+  }
+
+  /**
    * Check if there's a matching tool call for a claim.
-   * Simple heuristic: any tool call registered counts as evidence.
+   * Cross-references tool call arguments (file paths) with claimed paths.
    */
   private hasMatchingToolCall(claim: ActionClaim): boolean {
     if (this.executedToolCalls.size === 0) return false;
-    
+
     const text = claim.text.toLowerCase();
-    
+
     // Check for write claims
-    const hasWrite = text.includes("edit") || 
-                     text.includes("salv") || 
-                     text.includes("criei") || 
+    const hasWrite = text.includes("edit") ||
+                     text.includes("salv") ||
+                     text.includes("criei") ||
                      text.includes("creat") ||
                      text.includes("remov") ||
                      text.includes("delet");
-                     
+
     if (hasWrite) {
-      return Array.from(this.executedToolCalls.values()).some(tc => 
+      const writeTools = Array.from(this.executedToolCalls.values()).filter(tc =>
         tc.name.includes("edit") || tc.name.includes("write") || tc.name.includes("agent")
       );
+      if (writeTools.length === 0) return false;
+
+      // Extract file paths from the claim
+      const claimedPaths = this.extractClaimedPaths(claim.text);
+      if (claimedPaths.length === 0) {
+        // No specific path mentioned — any matching tool type is enough
+        return true;
+      }
+
+      // Cross-reference: at least one claimed path must match a tool call's path arg
+      return claimedPaths.some(claimed => {
+        const claimedBase = claimed.split("/").pop()!.toLowerCase();
+        return writeTools.some(tc => {
+          const toolPath = String(tc.args?.path || tc.args?.file_path || "");
+          if (!toolPath) return true; // tool has no path arg — can't invalidate
+          const toolBase = toolPath.split("/").pop()!.toLowerCase();
+          return toolBase === claimedBase || toolPath.toLowerCase().includes(claimedBase);
+        });
+      });
     }
-    
+
     // Check for execution claims
     const hasExec = text.includes("execut") || text.includes("rodei") || text.includes("ran") || text.includes("test") || text.includes("build");
-    
+
     if (hasExec) {
-      return Array.from(this.executedToolCalls.values()).some(tc => 
+      return Array.from(this.executedToolCalls.values()).some(tc =>
         tc.name.includes("exec")
       );
     }

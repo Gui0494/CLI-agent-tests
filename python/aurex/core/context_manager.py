@@ -1,7 +1,14 @@
 """
 Context Manager: Handles two levels of memory.
-1. Short-term context: Tracks current execution trace, steps, and tool call results.
-2. Long-term memory: General conversation history, with limits and summarization logic.
+
+Responsibilities (after Finding 5 unification):
+- **Long-term persistence**: Saves/loads conversation history to disk (.aurex/history.json)
+  for cross-session continuity. This is NOT the canonical source of truth for the
+  current session — that role belongs to ConversationStore (TypeScript).
+- **Short-term execution trace**: Tracks tool calls and results within the current
+  agent loop iteration.
+- **Sync**: Receives the canonical message list from Node via sync_from_node() at
+  the end of each agent loop round, ensuring both runtimes stay consistent.
 """
 
 from typing import List, Dict, Any
@@ -98,6 +105,24 @@ class ContextManager:
             "history": self.long_term_memory,
             "current_trace": self.current_execution_trace
         }
+
+    def sync_from_node(self, messages: List[Dict[str, Any]]) -> int:
+        """Sync long-term memory from the canonical ConversationStore (Node side).
+
+        Called at the end of each agent loop round to ensure Python's view
+        of the conversation matches the Node-side source of truth.
+
+        Returns the number of messages synced.
+        """
+        if not messages:
+            return 0
+        # Replace our long-term memory with the canonical list
+        self.long_term_memory = [
+            {"role": m.get("role", "user"), "content": m.get("content", "")}
+            for m in messages
+        ]
+        self.save_to_disk()
+        return len(self.long_term_memory)
 
     async def _enforce_history_limit(self):
         """Semantic summarization logic when history gets too long."""

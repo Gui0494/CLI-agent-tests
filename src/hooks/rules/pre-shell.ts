@@ -1,7 +1,11 @@
 /**
  * pre-shell.ts — Pre-shell hook rule
  *
- * Blocks destructive commands and warns about potentially dangerous ones.
+ * Warns about destructive and potentially dangerous commands.
+ * Both 'warn_destructive' and 'warn' classifications require user confirmation.
+ *
+ * @security-note The blocklist is a UX guardrail only. Real security
+ * is enforced by the Docker sandbox and user permission approvals.
  *
  * Reference: docs/architecture-reference/hooks/pre-shell.md
  */
@@ -23,9 +27,11 @@ export function preShellHook(context: HookContext): HookResult {
   const classification = classifyCommand(command);
 
   switch (classification.classification) {
-    case 'block':
+    case 'warn_destructive':
+      // Previously 'block' — now requires explicit user confirmation instead
+      // of silently refusing, since regex blocklists are trivially bypassable
       return {
-        action: HookAction.BLOCK,
+        action: HookAction.WARN,
         reason: classification.reason,
         suggestion: classification.suggestion,
       };
