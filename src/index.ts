@@ -8,6 +8,7 @@ import { createVerifier } from "./verifier/test-runner.js";
 import { createRepoAgent } from "./repo-agent/github.js";
 import { PythonBridge } from "./bridge/python-bridge.js";
 import { checkForUpdate } from "./cli/update-check.js";
+import { setNoColor } from "./cli/detect-mode.js";
 
 config();
 
@@ -20,9 +21,9 @@ program
   .name("aurex")
   .description("AurexAI - Local CLI Agent for code editing, web search, planning, and execution")
   .version("0.1.0")
-  .option("--no-color", "Disable color output")
+  .option("--plain", "Disable color output (respects NO_COLOR env var)")
   .option("--non-interactive", "Run in non-interactive mode (disable prompts)")
-  .option("--continue", "Resume the most recent session")
+  .option("--continue-session", "Resume the most recent session")
   .option("--resume <session-id>", "Resume a specific session by ID");
 
 program
@@ -30,7 +31,11 @@ program
   .alias("i")
   .description("Start interactive REPL mode")
   .action(async () => {
-    await startRepl();
+    const opts = program.opts();
+    await startRepl({
+      continueSession: opts.continueSession,
+      resumeSessionId: opts.resume,
+    });
   });
 
 program
@@ -169,9 +174,21 @@ program
     }
   });
 
+// Apply global flags before any command executes
+program.hook("preAction", (thisCommand) => {
+  const opts = thisCommand.opts();
+  if (opts.plain) {
+    setNoColor(true);
+  }
+});
+
 // Default: interactive mode
 program.action(async () => {
-  await startRepl();
+  const opts = program.opts();
+  await startRepl({
+    continueSession: opts.continueSession,
+    resumeSessionId: opts.resume,
+  });
 });
 
 program.parseAsync(process.argv).catch((err) => {

@@ -7,7 +7,12 @@
   "bin": {
     "aurex": "dist/index.js"
   },
+  "files": [
+    "dist",
+    "python"
+  ],
   "scripts": {
+    "prepare": "npm run build",
     "build": "tsc -p tsconfig.build.json",
     "build:bundle": "tsup",
     "dev": "tsx src/index.ts",

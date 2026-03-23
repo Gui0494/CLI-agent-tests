@@ -33,7 +33,12 @@ function parseCommandArgs(input: string): string[] {
   return matches;
 }
 
-export async function startRepl(): Promise<void> {
+export interface ReplOptions {
+  continueSession?: boolean;
+  resumeSessionId?: string;
+}
+
+export async function startRepl(options: ReplOptions = {}): Promise<void> {
   const bridge = new PythonBridge();
   const executor = createExecutor({});
 
@@ -89,8 +94,18 @@ export async function startRepl(): Promise<void> {
 
   setupBridgeHandlers(bridge, appContext, rl, {});
 
-  // Start session persistence
-  const sessionStore = new SessionStore();
+  // Start session persistence (with optional resume)
+  let resumeId: string | undefined;
+  if (options.resumeSessionId) {
+    resumeId = options.resumeSessionId;
+  } else if (options.continueSession) {
+    const recent = SessionStore.getMostRecent();
+    if (recent) {
+      resumeId = recent.id;
+      console.log(chalk.gray(`  Resuming session ${recent.id}`));
+    }
+  }
+  const sessionStore = new SessionStore(resumeId);
   sessionStore.open();
 
   // Start MCP servers (non-blocking)
