@@ -22,8 +22,13 @@ export const isCI: boolean =
   Boolean(process.env.JENKINS_URL);
 
 /** True when color output should be suppressed (https://no-color.org/). */
-export const noColor: boolean =
+export let noColor: boolean =
   "NO_COLOR" in process.env || process.env.TERM === "dumb";
+
+/** Called from CLI entry point to apply --plain flag. */
+export function setNoColor(value: boolean): void {
+  noColor = value;
+}
 
 /** True when stdout is being piped (e.g. `aurex | head`). */
 export const isPiped: boolean = !process.stdout.isTTY;

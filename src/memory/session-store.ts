@@ -5,7 +5,7 @@
  * timestamped event (message, tool call, mode change, etc.).
  *
  * Supports:
- * - `--continue` to resume the most recent session
+ * - `--continue-session` to resume the most recent session
  * - `--resume <session-id>` to resume a specific session
  */
 

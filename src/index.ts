@@ -8,6 +8,7 @@ import { createVerifier } from "./verifier/test-runner.js";
 import { createRepoAgent } from "./repo-agent/github.js";
 import { PythonBridge } from "./bridge/python-bridge.js";
 import { checkForUpdate } from "./cli/update-check.js";
+import { setNoColor } from "./cli/detect-mode.js";
 
 config();
 
@@ -30,7 +31,11 @@ program
   .alias("i")
   .description("Start interactive REPL mode")
   .action(async () => {
-    await startRepl();
+    const opts = program.opts();
+    await startRepl({
+      continueSession: opts.continueSession,
+      resumeSessionId: opts.resume,
+    });
   });
 
 program
@@ -169,9 +174,21 @@ program
     }
   });
 
+// Apply global flags before any command executes
+program.hook("preAction", (thisCommand) => {
+  const opts = thisCommand.opts();
+  if (opts.plain) {
+    setNoColor(true);
+  }
+});
+
 // Default: interactive mode
 program.action(async () => {
-  await startRepl();
+  const opts = program.opts();
+  await startRepl({
+    continueSession: opts.continueSession,
+    resumeSessionId: opts.resume,
+  });
 });
 
 program.parseAsync(process.argv).catch((err) => {
